@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useWorkbenchStore } from '@/store/workbench-store';
+import { useWorkbenchStore, selectActivePatientGroup } from '@/store/workbench-store';
 
 /**
  * Global keyboard shortcuts for the validation workbench:
  *
- *   A            approve the AI label for the active image
- *   R            open the relabel dialog
- *   ← / →        navigate the queue
- *   Home / End   jump to first / last image
+ *   A                      approve the AI label for the active image
+ *   R                      open the relabel dialog
+ *   ← / →                  navigate views within current patient
+ *   Shift+← / Shift+→      navigate between patients
+ *   Home / End             jump to first / last image (global)
  *
  * Typing inside inputs/textareas and the relabel modal (which has its own
  * Escape handling) are ignored.
@@ -17,9 +18,7 @@ import { useWorkbenchStore } from '@/store/workbench-store';
 export function useValidationShortcuts(): void {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
-        return;
-      }
+      if (event.repeat) return;
 
       const target = event.target as HTMLElement | null;
       if (
@@ -38,6 +37,12 @@ export function useValidationShortcuts(): void {
       // While the relabel modal is open only Escape should reach it.
       if (store.isRelabelOpen) return;
 
+      const activeGroup = selectActivePatientGroup(store);
+      const activeIndex = store.activeIndex;
+      const viewIndex = activeGroup ? activeIndex - activeGroup.startIndex : 0;
+
+      const isShift = event.shiftKey;
+
       switch (event.key) {
         case 'a':
         case 'A':
@@ -51,11 +56,23 @@ export function useValidationShortcuts(): void {
           break;
         case 'ArrowLeft':
           event.preventDefault();
-          store.goToPrev();
+          if (isShift) {
+            store.goToPrevPatientGroup();
+          } else if (activeGroup && viewIndex > 0) {
+            store.goToIndex(activeIndex - 1);
+          } else {
+            store.goToPrev();
+          }
           break;
         case 'ArrowRight':
           event.preventDefault();
-          store.goToNext();
+          if (isShift) {
+            store.goToNextPatientGroup();
+          } else if (activeGroup && viewIndex < activeGroup.cases.length - 1) {
+            store.goToIndex(activeIndex + 1);
+          } else {
+            store.goToNext();
+          }
           break;
         case 'Home':
           event.preventDefault();

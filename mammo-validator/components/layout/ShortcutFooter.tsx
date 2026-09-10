@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button, Kbd } from '@/components/ui/Button';
 import { useWorkbenchStore } from '@/store/workbench-store';
+import { useActivePatientGroup } from '@/hooks/usePatientGroups';
 
 /** Bottom status/shortcut bar. */
 export function ShortcutFooter() {
@@ -10,14 +11,22 @@ export function ShortcutFooter() {
   const activeIndex = useWorkbenchStore((state) => state.activeIndex);
   const goToPrev = useWorkbenchStore((state) => state.goToPrev);
   const goToNext = useWorkbenchStore((state) => state.goToNext);
+  const goToPrevPatientGroup = useWorkbenchStore((state) => state.goToPrevPatientGroup);
+  const goToNextPatientGroup = useWorkbenchStore((state) => state.goToNextPatientGroup);
   const recordByImageId = useWorkbenchStore((state) => state.recordByImageId);
+  const activeGroup = useActivePatientGroup(cases, activeIndex);
 
   const records = Object.values(recordByImageId);
   const approved = records.filter((r) => r.status === 'APPROVED').length;
   const relabelled = records.filter((r) => r.status === 'RELABELED').length;
   const reviewed = records.length;
-  const canPrev = activeIndex > 0;
-  const canNext = activeIndex < cases.length - 1;
+
+  const viewIndex = activeGroup ? activeIndex - activeGroup.startIndex : 0;
+  const totalViews = activeGroup ? activeGroup.cases.length : 1;
+  const canPrevView = viewIndex > 0;
+  const canNextView = viewIndex < totalViews - 1;
+  const canPrevPatient = activeGroup && activeGroup.startIndex > 0;
+  const canNextPatient = activeGroup && activeGroup.endIndex < cases.length - 1;
 
   return (
     <footer className="flex h-11 shrink-0 items-center justify-between gap-4 border-t border-slate-800 bg-slate-900/60 px-4">
@@ -43,7 +52,11 @@ export function ShortcutFooter() {
         </span>
         <span className="inline-flex items-center gap-1.5">
           <Kbd>←</Kbd>
-          <Kbd>→</Kbd> navigate
+          <Kbd>→</Kbd> view
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <Kbd>⇧←</Kbd>
+          <Kbd>⇧→</Kbd> patient
         </span>
       </div>
 
@@ -51,24 +64,49 @@ export function ShortcutFooter() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={goToPrev}
-          disabled={!canPrev}
-          className="h-7 px-2 text-xs"
+          onClick={goToPrevPatientGroup}
+          disabled={!canPrevPatient}
+          className="h-7 px-2 text-xs opacity-60 hover:opacity-100"
+          title="Previous patient (Shift+←)"
         >
-          <ChevronLeft className="size-3.5" /> Prev
+          <ChevronLeft className="size-3.5" />
         </Button>
-        <span className="min-w-14 text-center font-mono text-xs text-slate-400">
-          {cases.length ? activeIndex + 1 : 0} / {cases.length}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={goToPrev}
+          disabled={!canPrevView}
+          className="h-7 px-2 text-xs"
+          title="Previous view (←)"
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <span className="min-w-20 text-center font-mono text-xs text-slate-400">
+          {viewIndex + 1} / {totalViews}
         </span>
         <Button
           variant="ghost"
           size="sm"
           onClick={goToNext}
-          disabled={!canNext}
+          disabled={!canNextView}
           className="h-7 px-2 text-xs"
+          title="Next view (→)"
         >
-          Next <ChevronRight className="size-3.5" />
+          <ChevronRight className="size-3.5" />
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={goToNextPatientGroup}
+          disabled={!canNextPatient}
+          className="h-7 px-2 text-xs opacity-60 hover:opacity-100"
+          title="Next patient (Shift+→)"
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+        <span className="min-w-14 text-center font-mono text-xs text-slate-400">
+          {cases.length ? activeIndex + 1 : 0} / {cases.length}
+        </span>
       </div>
     </footer>
   );

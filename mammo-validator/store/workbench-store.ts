@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
 import { RADIOLOGIST } from '@/lib/config';
 import { biradsAuditLabel } from '@/lib/taxonomy';
 import type {
@@ -45,6 +46,8 @@ interface WorkbenchState {
   goToIndex: (index: number) => void;
   goToNext: () => void;
   goToPrev: () => void;
+  goToNextPatientGroup: () => void;
+  goToPrevPatientGroup: () => void;
 
   approveActive: () => Promise<void>;
   relabelActive: (finalLabel: string, notes: string) => Promise<void>;
@@ -78,7 +81,8 @@ function buildRecord(
   };
 }
 
-export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
+export const useWorkbenchStore = create<WorkbenchState>()(
+  subscribeWithSelector((set, get) => {
   /** Shared optimistic commit + server POST helper for approve / relabel. */
   async function commitDecision(record: ValidationRecord): Promise<void> {
     const { imageId } = record;
@@ -133,10 +137,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       set({ isLoadingCases: true, casesError: null });
       try {
         const { fetchCases } = await import('@/lib/api-client');
-        const cases = await fetchCases();
-        if (cases.length === 0) {
+        const fetched = await fetchCases();
+        if (fetched.length === 0) {
           throw new Error('Worklist is empty.');
         }
+        // Sort by patient id so each patient's cases are contiguous. The
+        // patient-grouping logic (startIndex/endIndex) requires contiguity;
+        // without it the same patient appears in multiple groups. Stable sort
+        // preserves within-patient order (CSV order = flag confidence).
+        const cases = [...fetched].sort((a, b) =>
+          a.patient.id < b.patient.id ? -1 : a.patient.id > b.patient.id ? 1 : 0,
+        );
         set({ cases, isLoadingCases: false, activeIndex: 0 });
       } catch (error) {
         set({
@@ -167,6 +178,32 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const { activeIndex } = get();
       if (activeIndex > 0) {
         set({ activeIndex: activeIndex - 1 });
+      }
+    },
+
+    goToNextPatientGroup: () => {
+      const state = get();
+      if (state.cases.length === 0) return;
+      const groups = selectPatientGroups(state);
+      const activeGroup = groups.find(g => state.activeIndex >= g.startIndex && state.activeIndex <= g.endIndex);
+      if (activeGroup) {
+        const activeGroupIdx = groups.indexOf(activeGroup);
+        if (activeGroupIdx < groups.length - 1) {
+          set({ activeIndex: groups[activeGroupIdx + 1].startIndex });
+        }
+      }
+    },
+
+    goToPrevPatientGroup: () => {
+      const state = get();
+      if (state.cases.length === 0) return;
+      const groups = selectPatientGroups(state);
+      const activeGroup = groups.find(g => state.activeIndex >= g.startIndex && state.activeIndex <= g.endIndex);
+      if (activeGroup) {
+        const activeGroupIdx = groups.indexOf(activeGroup);
+        if (activeGroupIdx > 0) {
+          set({ activeIndex: groups[activeGroupIdx - 1].endIndex });
+        }
       }
     },
 
@@ -204,7 +241,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     dismissNotice: () => set({ notice: null }),
   };
-});
+})
+);
 
 /* ---------- Pure selectors (for component subscriptions) ---------- */
 
@@ -225,4 +263,80 @@ export function selectDecisionFor(
   imageId: string
 ): ValidationRecord | undefined {
   return state.recordByImageId[imageId];
+}
+
+/* ---------- Patient grouping selectors ---------- */
+
+export interface PatientGroup {
+  patientId: string;
+  patient: StudyCase['patient'];
+  study: StudyCase['study'];
+  cases: StudyCase[];
+  startIndex: number;
+  endIndex: number;
+}
+
+export function selectPatientGroups(state: WorkbenchState): PatientGroup[] {
+  const { cases } = state;
+  const groups: PatientGroup[] = [];
+  let currentGroup: PatientGroup | null = null;
+
+  cases.forEach((c, i) => {
+    const pid = c.patient.id;
+    if (!currentGroup || currentGroup.patientId !== pid) {
+      if (currentGroup) {
+        groups.push(currentGroup);
+      }
+      currentGroup = {
+        patientId: pid,
+        patient: c.patient,
+        study: c.study,
+        cases: [],
+        startIndex: i,
+        endIndex: i,
+      };
+    }
+    currentGroup.cases.push(c);
+    currentGroup.endIndex = i;
+  });
+
+  if (currentGroup) {
+    groups.push(currentGroup);
+  }
+
+  return groups;
+}
+
+export function selectActivePatientGroup(state: WorkbenchState): PatientGroup | undefined {
+  const groups = selectPatientGroups(state);
+  const activeIndex = state.activeIndex;
+  return groups.find(g => activeIndex >= g.startIndex && activeIndex <= g.endIndex);
+}
+
+export function selectActiveCaseIndexInGroup(state: WorkbenchState): number {
+  const group = selectActivePatientGroup(state);
+  if (!group) return 0;
+  return state.activeIndex - group.startIndex;
+}
+
+export function selectNextPatientGroupIndex(state: WorkbenchState): number | null {
+  const groups = selectPatientGroups(state);
+  const activeGroup = selectActivePatientGroup(state);
+  if (!activeGroup) return null;
+  const activeGroupIdx = groups.indexOf(activeGroup);
+  if (activeGroupIdx < groups.length - 1) {
+    return groups[activeGroupIdx + 1].startIndex;
+  }
+  return null;
+}
+
+export function selectPrevPatientGroupIndex(state: WorkbenchState): number | null {
+  const groups = selectPatientGroups(state);
+  const activeGroup = selectActivePatientGroup(state);
+  if (!activeGroup) return null;
+  const activeGroupIdx = groups.indexOf(activeGroup);
+  if (activeGroupIdx > 0) {
+    return groups[activeGroupIdx - 1].endIndex;
+  }
+  return null;
 }
