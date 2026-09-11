@@ -15,7 +15,7 @@ Zustand**, and **Cornerstone3D v5** for native DICOM rendering.
 
 | Area | What you get |
 | --- | --- |
-| Viewer | Dark-stage mammogram viewer with **Zoom** (wheel / drag / button), **Pan**, **Window/Level** for DICOM and brightness/contrast for PNG, fit/reset, double-click reset |
+| Viewer | Dark-stage mammogram viewer with **Brightness / Contrast sliders**, **Pan** (drag), **Zoom** (wheel or −/+ buttons), fit/reset, double-click reset — no mode switching: drag always pans and the wheel always zooms |
 | DICOM | Native in-browser decoding via Cornerstone3D (`@cornerstonejs/dicom-image-loader`, wadouri `dicomfile:` scheme) — no server-side image conversion |
 | PNG/JPG | Canvas renderer with the same gestures and a live zoom readout |
 | Header | Patient ID, age/sex, study date, accession, **view (MLO/CC) + side (L/R)**, image type chip |
@@ -202,7 +202,7 @@ components/
   viewer/ImageViewer.tsx                      # routes PNG vs DICOM, hosts toolbar
   viewer/PngImageViewer.tsx                   # canvas renderer (zoom/pan/brightness)
   viewer/DicomViewer.tsx                      # Cornerstone3D stack viewport
-  viewer/ViewerToolbar.tsx                    # Pan / Zoom / Window + Fit/Reset
+  viewer/ViewerToolbar.tsx                    # Brightness/Contrast bars + Zoom + Reset
   panel/ValidationPanel.tsx                   # AI label card, findings, actions
   relabel/RelabelModal.tsx                    # BI-RADS / 3-class picker + notes
   layout/ and ui/                             # shell, toast, buttons, modal, badges

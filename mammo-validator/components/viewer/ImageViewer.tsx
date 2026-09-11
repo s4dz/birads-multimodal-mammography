@@ -5,9 +5,17 @@ import { AlertTriangle, CheckCircle2, LoaderCircle } from 'lucide-react';
 import type { StudyCase } from '@/lib/types';
 import { DicomViewer } from './DicomViewer';
 import { PngImageViewer } from './PngImageViewer';
-import { ViewerToolbar, type ViewerTool } from './ViewerToolbar';
+import { DISPLAY_NEUTRAL, ViewerToolbar } from './ViewerToolbar';
 
 export type ViewerPhase = 'loading' | 'ready' | 'error';
+
+/** A zoom step requested from the toolbar, applied around the viewport centre. */
+export interface ZoomRequest {
+  /** Monotonic id so repeated requests (even the same direction) still fire. */
+  nonce: number;
+  /** Multiplicative zoom factor, e.g. 1.25 to zoom in, 0.8 to zoom out. */
+  factor: number;
+}
 
 /** Center stage status overlay (loading spinner / fatal error). */
 export function StageStatus({ phase }: { phase: ViewerPhase }) {
@@ -68,38 +76,52 @@ interface ImageViewerProps {
 
 /**
  * Central image canvas: routes to the native Cornerstone DICOM renderer or the
- * canvas-based PNG renderer and hosts the shared floating toolbar.
+ * canvas-based PNG renderer and hosts the shared floating control bar.
  *
  * The parent (Workbench) mounts one instance per image id (`key={imageId}`) so
- * every new study starts with a clean viewport and full reset.
+ * every new study starts with a clean viewport, default display and full reset.
  */
 export function ImageViewer({ caseStudy }: ImageViewerProps) {
-  const [tool, setTool] = useState<ViewerTool>('window');
   const [resetNonce, setResetNonce] = useState(0);
+  const [brightness, setBrightness] = useState(DISPLAY_NEUTRAL);
+  const [contrast, setContrast] = useState(DISPLAY_NEUTRAL);
+  const [zoomPercent, setZoomPercent] = useState(100);
+  const [zoomRequest, setZoomRequest] = useState<ZoomRequest>({
+    nonce: 0,
+    factor: 1,
+  });
   const [phase, setPhase] = useState<ViewerPhase>('loading');
   const [formatCaption, setFormatCaption] = useState<string | undefined>();
 
   const isDicom = caseStudy.image.type === 'dicom';
 
+  const requestZoom = (factor: number) =>
+    setZoomRequest((previous) => ({ nonce: previous.nonce + 1, factor }));
+
+  const handleReset = () => {
+    setBrightness(DISPLAY_NEUTRAL);
+    setContrast(DISPLAY_NEUTRAL);
+    setResetNonce((nonce) => nonce + 1);
+  };
+
+  const viewerProps = {
+    caseStudy,
+    brightness,
+    contrast,
+    zoomRequest,
+    resetNonce,
+    onZoomChange: setZoomPercent,
+    onPhaseChange: setPhase,
+    onFormatChange: setFormatCaption,
+  };
+
   return (
     <div className="relative min-h-0 flex-1">
       <div className="absolute inset-0">
         {isDicom ? (
-          <DicomViewer
-            caseStudy={caseStudy}
-            tool={tool}
-            resetNonce={resetNonce}
-            onPhaseChange={setPhase}
-            onFormatChange={setFormatCaption}
-          />
+          <DicomViewer {...viewerProps} />
         ) : (
-          <PngImageViewer
-            caseStudy={caseStudy}
-            tool={tool}
-            resetNonce={resetNonce}
-            onPhaseChange={setPhase}
-            onFormatChange={setFormatCaption}
-          />
+          <PngImageViewer {...viewerProps} />
         )}
       </div>
 
@@ -109,9 +131,14 @@ export function ImageViewer({ caseStudy }: ImageViewerProps) {
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
         <div className="pointer-events-auto">
           <ViewerToolbar
-            tool={tool}
-            onToolChange={setTool}
-            onReset={() => setResetNonce((n) => n + 1)}
+            brightness={brightness}
+            contrast={contrast}
+            onBrightnessChange={setBrightness}
+            onContrastChange={setContrast}
+            zoomPercent={zoomPercent}
+            onZoomIn={() => requestZoom(1.25)}
+            onZoomOut={() => requestZoom(0.8)}
+            onReset={handleReset}
             formatCaption={formatCaption}
           />
         </div>

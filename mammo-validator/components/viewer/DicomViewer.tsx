@@ -1,23 +1,20 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Types } from '@cornerstonejs/core';
 import type { StudyCase } from '@/lib/types';
-import type { ViewerTool } from './ViewerToolbar';
-import type { ViewerPhase } from './ImageViewer';
+import type { ViewerPhase, ZoomRequest } from './ImageViewer';
 
 /**
  * Native DICOM renderer powered by Cornerstone3D v5.
  *
- * Each mounted instance owns one RenderingEngine + StackViewport and a tool
- * group configured for mammography reading:
- *   - Wheel ............... ZoomTool (native mouseWheelCallback)
- *   - Right-drag .......... ZoomTool
- *   - Middle-drag ......... PanTool
- *   - Left-drag ........... the active toolbar tool (Window/Level, Pan, Zoom)
+ * Reading gestures — no mode switching:
+ *   - drag (left / middle) ... pan
+ *   - wheel / right-drag ..... zoom
  *
- * DICOM P10 files are fetched from `/public/samples` and registered with the
- * DICOM image loader's `wadouri.fileManager` (imageId scheme `dicomfile:`).
+ * Window/Level is driven by the toolbar brightness & contrast sliders (mapped
+ * onto the viewport VOI range), so the doctor never drags on the image to
+ * change the display.
  *
  * NOTE: all Cornerstone modules are imported dynamically so none of their
  * browser-only assumptions leak into SSR.
@@ -31,11 +28,20 @@ type CornerstoneModules = {
   >['default'];
 };
 
+interface VoIRange {
+  lower: number;
+  upper: number;
+}
+
 type StackViewportLike = {
   setStack(imageIds: string[]): Promise<unknown>;
   render(): void;
   resetCamera(): void;
   resetProperties(): void;
+  getProperties?: () => { voiRange?: VoIRange } | undefined;
+  setProperties?: (properties: { voiRange: VoIRange }) => void;
+  getZoom?: () => number;
+  setZoom?: (zoom: number) => void;
 };
 
 type ToolGroupLike = {
@@ -44,9 +50,11 @@ type ToolGroupLike = {
     toolName: string,
     options: { bindings: { mouseButton: number }[] }
   ): void;
-  setToolDisabled(toolName: string): void;
   addViewport(viewportId: string, renderingEngineId: string): void;
 };
+
+const clamp = (v: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, v));
 
 let cornerstonePromise: Promise<CornerstoneModules> | null = null;
 
@@ -77,16 +85,22 @@ function getCornerstoneModules(): Promise<CornerstoneModules> {
 
 interface DicomViewerProps {
   caseStudy: StudyCase;
-  tool: ViewerTool;
+  brightness: number;
+  contrast: number;
+  zoomRequest: ZoomRequest;
   resetNonce: number;
+  onZoomChange: (percent: number) => void;
   onPhaseChange: (phase: ViewerPhase) => void;
   onFormatChange: (caption: string | undefined) => void;
 }
 
 export function DicomViewer({
   caseStudy,
-  tool,
+  brightness,
+  contrast,
+  zoomRequest,
   resetNonce,
+  onZoomChange,
   onPhaseChange,
   onFormatChange,
 }: DicomViewerProps) {
@@ -98,7 +112,26 @@ export function DicomViewer({
   } | null>(null);
   const toolGroupRef = useRef<ToolGroupLike | null>(null);
   const viewportRef = useRef<StackViewportLike | null>(null);
+  const baseVoiRef = useRef<VoIRange | null>(null);
+  const fitZoomRef = useRef(1);
+  const onZoomChangeRef = useRef(onZoomChange);
   const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    onZoomChangeRef.current = onZoomChange;
+  }, [onZoomChange]);
+
+  /** Remember the DICOM default window + fit zoom as the reset baseline. */
+  const captureBaseline = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const range = viewport.getProperties?.()?.voiRange;
+    if (range && range.upper > range.lower) {
+      baseVoiRef.current = { lower: range.lower, upper: range.upper };
+    }
+    const zoom = viewport.getZoom?.();
+    if (zoom && zoom > 0) fitZoomRef.current = zoom;
+  }, []);
 
   /* ---------------- engine lifecycle (mount per image) ---------------- */
 
@@ -131,7 +164,7 @@ export function DicomViewer({
         engineRef.current = engine;
         viewportRef.current = viewport;
 
-        // 2. Tool group (Window/Level · Pan · Zoom)
+        // 2. Tool group (Pan on drag · Zoom on wheel / right-drag)
         const toolGroup =
           cs.tools.ToolGroupManager.createToolGroup(toolGroupId);
         if (!toolGroup) {
@@ -139,7 +172,6 @@ export function DicomViewer({
         }
         toolGroup.addTool(cs.tools.ZoomTool.toolName);
         toolGroup.addTool(cs.tools.PanTool.toolName);
-        toolGroup.addTool(cs.tools.WindowLevelTool.toolName);
         toolGroup.addViewport(viewportId, engineId);
         toolGroupRef.current = toolGroup;
 
@@ -169,7 +201,11 @@ export function DicomViewer({
             `DICOM ${pixel.bitsStored ?? 16}-bit · ${pixel.rows}×${pixel.columns}`
           );
         }
+
+        // 5. Remember the default window + fit zoom as the reset baseline
+        captureBaseline();
         setLoaded(true);
+        onZoomChangeRef.current(100);
         onPhaseChange('ready');
       } catch (error) {
         if (!cancelled) {
@@ -210,7 +246,7 @@ export function DicomViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseStudy.imageId, caseStudy.image.url]);
 
-  /* ---------------- tool mode + reset wiring ---------------- */
+  /* ---------------- tool wiring (drag = pan, wheel = zoom) ---------------- */
 
   useEffect(() => {
     const cs = csRef.current;
@@ -218,47 +254,65 @@ export function DicomViewer({
     if (!cs || !toolGroup) return;
 
     const { MouseBindings } = cs.tools.Enums;
-    const { WindowLevelTool, PanTool, ZoomTool } = cs.tools;
-    const primary = [{ mouseButton: MouseBindings.Primary }];
-    const wheelAndSecondary = [
-      { mouseButton: MouseBindings.Wheel },
-      { mouseButton: MouseBindings.Secondary },
-    ];
+    const { PanTool, ZoomTool } = cs.tools;
 
-    if (tool === 'window') {
-      toolGroup.setToolDisabled(PanTool.toolName);
-      toolGroup.setToolDisabled(ZoomTool.toolName);
-      toolGroup.setToolActive(WindowLevelTool.toolName, { bindings: primary });
-      // keep pan on the middle button & zoom on wheel/right-click available
-      toolGroup.setToolActive(PanTool.toolName, {
-        bindings: [{ mouseButton: MouseBindings.Auxiliary }],
+    toolGroup.setToolActive(PanTool.toolName, {
+      bindings: [
+        { mouseButton: MouseBindings.Primary },
+        { mouseButton: MouseBindings.Auxiliary },
+      ],
+    });
+    toolGroup.setToolActive(ZoomTool.toolName, {
+      bindings: [
+        { mouseButton: MouseBindings.Wheel },
+        { mouseButton: MouseBindings.Secondary },
+      ],
+    });
+  }, [loaded, caseStudy.imageId]);
+
+  /* ---------------- brightness / contrast -> viewport VOI ---------------- */
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const base = baseVoiRef.current;
+    if (!loaded || !viewport || !base) return;
+
+    const baseWidth = base.upper - base.lower;
+    if (!(baseWidth > 0)) return;
+    const baseCenter = (base.upper + base.lower) / 2;
+
+    // Contrast squeezes / stretches the window; brightness shifts its centre.
+    const width = baseWidth * (100 / clamp(contrast, 25, 200));
+    const center = baseCenter - ((brightness - 100) / 100) * baseWidth * 0.75;
+
+    try {
+      viewport.setProperties?.({
+        voiRange: { lower: center - width / 2, upper: center + width / 2 },
       });
-      toolGroup.setToolActive(ZoomTool.toolName, {
-        bindings: wheelAndSecondary,
-      });
-    } else if (tool === 'pan') {
-      toolGroup.setToolDisabled(WindowLevelTool.toolName);
-      toolGroup.setToolDisabled(ZoomTool.toolName);
-      toolGroup.setToolActive(PanTool.toolName, {
-        bindings: [
-          { mouseButton: MouseBindings.Primary },
-          { mouseButton: MouseBindings.Auxiliary },
-        ],
-      });
-      toolGroup.setToolActive(ZoomTool.toolName, {
-        bindings: wheelAndSecondary,
-      });
-    } else {
-      toolGroup.setToolDisabled(WindowLevelTool.toolName);
-      toolGroup.setToolDisabled(PanTool.toolName);
-      toolGroup.setToolActive(ZoomTool.toolName, {
-        bindings: [
-          { mouseButton: MouseBindings.Primary },
-          ...wheelAndSecondary,
-        ],
-      });
+      viewport.render();
+    } catch {
+      /* this build may not expose programmatic VOI */
     }
-  }, [tool, loaded, caseStudy.imageId]);
+  }, [brightness, contrast, loaded]);
+
+  /* ---------------- toolbar zoom buttons ---------------- */
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!loaded || !viewport || zoomRequest.nonce === 0) return;
+    const current = viewport.getZoom?.() ?? fitZoomRef.current;
+    const next = clamp(current * zoomRequest.factor, 0.05, 50);
+    try {
+      viewport.setZoom?.(next);
+      viewport.render();
+    } catch {
+      return;
+    }
+    const base = fitZoomRef.current || 1;
+    onZoomChangeRef.current(Math.round((next / base) * 100));
+  }, [zoomRequest, loaded]);
+
+  /* ---------------- toolbar reset ---------------- */
 
   useEffect(() => {
     if (resetNonce === 0) return;
@@ -271,7 +325,9 @@ export function DicomViewer({
       /* some viewport types don't expose properties reset */
     }
     viewport.render();
-  }, [resetNonce, loaded, caseStudy.imageId]);
+    captureBaseline();
+    onZoomChangeRef.current(100);
+  }, [resetNonce, loaded, caseStudy.imageId, captureBaseline]);
 
   return (
     <div

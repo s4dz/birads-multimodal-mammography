@@ -2,22 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StudyCase } from '@/lib/types';
-import type { ViewerTool } from './ViewerToolbar';
-import type { ViewerPhase } from './ImageViewer';
+import type { ViewerPhase, ZoomRequest } from './ImageViewer';
 
 /**
  * Canvas renderer for standard web images (PNG/JPG exports of mammograms).
  *
- * Implements the same reading gestures as the DICOM viewport:
- *  - wheel ......... zoom anchored at the cursor
- *  - left-drag ..... depends on the active tool:
- *       window ......... vertical = brightness, horizontal = contrast
- *       pan ............ move the image
- *       zoom ........... vertical drag zooms
- *  - double-click / Fit button -> reset to fit window
+ * Reading gestures — no mode switching:
+ *   - drag .......... pan
+ *   - wheel ......... zoom anchored at the cursor
+ *   - double-click .. fit to window
+ *
+ * Brightness / contrast come exclusively from the toolbar sliders, so the
+ * mammogram itself is only ever panned or zoomed — never used as a slider.
  */
-
-type PointerMode = 'pan' | 'zoom' | 'window';
 
 interface Camera {
   sx: number;
@@ -31,16 +28,22 @@ const clamp = (v: number, min: number, max: number) =>
 
 interface PngImageViewerProps {
   caseStudy: StudyCase;
-  tool: ViewerTool;
+  brightness: number;
+  contrast: number;
+  zoomRequest: ZoomRequest;
   resetNonce: number;
+  onZoomChange: (percent: number) => void;
   onPhaseChange: (phase: ViewerPhase) => void;
   onFormatChange: (caption: string | undefined) => void;
 }
 
 export function PngImageViewer({
   caseStudy,
-  tool,
+  brightness,
+  contrast,
+  zoomRequest,
   resetNonce,
+  onZoomChange,
   onPhaseChange,
   onFormatChange,
 }: PngImageViewerProps) {
@@ -49,19 +52,16 @@ export function PngImageViewer({
   const imageRef = useRef<HTMLImageElement | null>(null);
 
   const cameraRef = useRef<Camera>({ sx: 1, ox: 0, oy: 0, fitScale: 1 });
-  const windowRef = useRef({ brightness: 100, contrast: 100 });
-  const dragRef = useRef<{
-    active: boolean;
-    mode: PointerMode;
-    lastX: number;
-    lastY: number;
-  }>({ active: false, mode: 'pan', lastX: 0, lastY: 0 });
-  const pointerModeRef = useRef<PointerMode>('pan');
+  const dragRef = useRef({ active: false, lastX: 0, lastY: 0 });
+  const displayRef = useRef({ brightness, contrast });
+  const onZoomChangeRef = useRef(onZoomChange);
 
   const [zoomPct, setZoomPct] = useState(100);
 
-  pointerModeRef.current =
-    tool === 'pan' ? 'pan' : tool === 'zoom' ? 'zoom' : 'window';
+  /* Keep the callback in a ref so `draw` stays referentially stable. */
+  useEffect(() => {
+    onZoomChangeRef.current = onZoomChange;
+  }, [onZoomChange]);
 
   /* ---------------- drawing ---------------- */
 
@@ -86,14 +86,16 @@ export function PngImageViewer({
     }
 
     const cam = cameraRef.current;
+    const display = displayRef.current;
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#040506';
     ctx.fillRect(0, 0, cssWidth, cssHeight);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.filter =
-      `brightness(${windowRef.current.brightness}%) ` +
-      `contrast(${windowRef.current.contrast}%)`;
+      `brightness(${display.brightness}%) ` +
+      `contrast(${display.contrast}%)`;
     ctx.drawImage(
       image,
       cam.ox,
@@ -105,7 +107,14 @@ export function PngImageViewer({
 
     const pct = Math.round((cam.sx / cam.fitScale) * 100);
     setZoomPct((prev) => (prev === pct ? prev : pct));
+    onZoomChangeRef.current(pct);
   }, []);
+
+  /* Brightness / contrast bars -> immediate redraw. */
+  useEffect(() => {
+    displayRef.current = { brightness, contrast };
+    draw();
+  }, [brightness, contrast, draw]);
 
   /* ---------------- camera ops ---------------- */
 
@@ -126,7 +135,6 @@ export function PngImageViewer({
     cam.sx = fitScale;
     cam.ox = (cssWidth - image.naturalWidth * fitScale) / 2;
     cam.oy = (cssHeight - image.naturalHeight * fitScale) / 2;
-    windowRef.current = { brightness: 100, contrast: 100 };
     draw();
   }, [draw]);
 
@@ -135,12 +143,7 @@ export function PngImageViewer({
     const cam = cameraRef.current;
     const imageX = (cx - cam.ox) / cam.sx;
     const imageY = (cy - cam.oy) / cam.sx;
-    const nextScale = clamp(
-      cam.sx * factor,
-      cam.fitScale * 0.1,
-      cam.fitScale * 60
-    );
-    cam.sx = nextScale;
+    cam.sx = clamp(cam.sx * factor, cam.fitScale * 0.1, cam.fitScale * 60);
     cam.ox = cx - imageX * cam.sx;
     cam.oy = cy - imageY * cam.sx;
   }, []);
@@ -190,14 +193,7 @@ export function PngImageViewer({
     function onPointerDown(event: PointerEvent) {
       el.setPointerCapture(event.pointerId);
       const { x, y } = toLocal(event);
-      dragRef.current = {
-        active: true,
-        mode: pointerModeRef.current,
-        lastX: x,
-        lastY: y,
-      };
-      el.style.cursor =
-        pointerModeRef.current === 'pan' ? 'grabbing' : 'crosshair';
+      dragRef.current = { active: true, lastX: x, lastY: y };
       event.preventDefault();
     }
 
@@ -205,22 +201,11 @@ export function PngImageViewer({
       const drag = dragRef.current;
       if (!drag.active) return;
       const { x, y } = toLocal(event);
-      const dx = x - drag.lastX;
-      const dy = y - drag.lastY;
+      const cam = cameraRef.current;
+      cam.ox += x - drag.lastX;
+      cam.oy += y - drag.lastY;
       drag.lastX = x;
       drag.lastY = y;
-      const cam = cameraRef.current;
-
-      if (drag.mode === 'pan') {
-        cam.ox += dx;
-        cam.oy += dy;
-      } else if (drag.mode === 'zoom') {
-        zoomAt(x, y, Math.pow(1.012, -dy * 2));
-      } else {
-        const w = windowRef.current;
-        w.brightness = clamp(w.brightness + dy * 0.7, 25, 320);
-        w.contrast = clamp(w.contrast + dx * 0.5, 10, 250);
-      }
       draw();
       event.preventDefault();
     }
@@ -267,22 +252,27 @@ export function PngImageViewer({
     };
   }, [fitToWindow, draw, zoomAt]);
 
-  /* cursor + reset driven by props */
+  /* Toolbar zoom buttons. */
   useEffect(() => {
+    if (zoomRequest.nonce === 0) return;
     const canvas = canvasRef.current;
-    if (!canvas || dragRef.current.active) return;
-    canvas.style.cursor =
-      tool === 'pan' ? 'grab' : tool === 'zoom' ? 'zoom-in' : 'crosshair';
-  }, [tool]);
+    if (!canvas) return;
+    zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, zoomRequest.factor);
+    draw();
+  }, [zoomRequest, zoomAt, draw]);
 
+  /* Toolbar reset. */
   useEffect(() => {
     if (resetNonce > 0) fitToWindow();
   }, [resetNonce, fitToWindow]);
 
   return (
     <div ref={wrapRef} className="absolute inset-0 overflow-hidden bg-black">
-      <canvas ref={canvasRef} className="h-full w-full" />
-      <div className="pointer-events-none absolute bottom-2 left-3 rounded bg-slate-950/60 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 backdrop-blur">
+      <canvas
+        ref={canvasRef}
+        className="h-full w-full cursor-grab active:cursor-grabbing"
+      />
+      <div className="pointer-events-none absolute bottom-14 left-3 rounded bg-slate-950/60 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 backdrop-blur">
         {zoomPct}%
       </div>
     </div>

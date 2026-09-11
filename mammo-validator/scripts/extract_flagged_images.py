@@ -63,6 +63,8 @@ def main():
             csv_image_path,  # Original path from CSV
             os.path.join(kaggle_input_root, patient_id, f"{image_id}.png"),  # Standard structure
             os.path.join(kaggle_input_root, patient_id, image_id),  # In case image_id already has .png
+            os.path.join(kaggle_input_root, image_id),  # Flat layout: <root>/<image_id>.png
+            os.path.join(kaggle_input_root, 'cl', image_id),  # <root>/cl/<image_id>.png
         ]
         
         src_path = None
