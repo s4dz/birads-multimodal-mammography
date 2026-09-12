@@ -15,7 +15,6 @@ import {
   type LabelKind,
 } from '@/lib/taxonomy';
 import type { Tone } from '@/lib/types';
-import { RADIOLOGIST } from '@/lib/config';
 import {
   selectActiveCase,
   useWorkbenchStore,
@@ -30,6 +29,9 @@ function toneDot(tone: Tone): string {
 }
 
 export function RelabelModal() {
+  const reviewerId = useWorkbenchStore(
+    (state) => state.reviewer?.id ?? ""
+  );
   const open = useWorkbenchStore((state) => state.isRelabelOpen);
   const active = useWorkbenchStore(selectActiveCase);
   const closeRelabel = useWorkbenchStore((state) => state.closeRelabel);
@@ -77,7 +79,7 @@ export function RelabelModal() {
       onClose={closeRelabel}
       title={
         <span className="flex items-center gap-2">
-          Relabel {active.imageId}
+          Relabel patient {active.patient.id}
           <span className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
             {active.acquisition.laterality}-{active.acquisition.view}
           </span>
@@ -102,11 +104,11 @@ export function RelabelModal() {
       <div className="space-y-4">
         {/* Context: what the AI said */}
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2 text-xs">
-          <span className="text-slate-500">AI proposed</span>
+          <span className="text-slate-500">AI suggestion</span>
           <ToneBadge tone={biradsDescriptor(active.ai.biradsGrade).tone}>
             {originalLabel}
           </ToneBadge>
-          <span className="ml-auto text-slate-600">{RADIOLOGIST.id}</span>
+          <span className="ml-auto text-slate-600">{reviewerId}</span>
         </div>
 
         {/* Taxonomy switcher */}
@@ -209,9 +211,9 @@ export function RelabelModal() {
             })}
           </div>
         )}
-        <p className="mt-1.5 text-[10px] text-slate-600">
-          Tip: choose the category you would report — it overrides the AI label
-          for this image.
+<p className="mt-1.5 text-[10px] text-slate-600">
+          Tip: choose the category you would report — it overrides the AI
+          label for this patient's study (all views).
         </p>
       </div>
 

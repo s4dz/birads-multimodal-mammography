@@ -19,7 +19,7 @@ Zustand**, and **Cornerstone3D v5** for native DICOM rendering.
 | DICOM | Native in-browser decoding via Cornerstone3D (`@cornerstonejs/dicom-image-loader`, wadouri `dicomfile:` scheme) — no server-side image conversion |
 | PNG/JPG | Canvas renderer with the same gestures and a live zoom readout |
 | Header | Patient ID, age/sex, study date, accession, **view (MLO/CC) + side (L/R)**, image type chip |
-| Validation panel | Current AI label (BI-RADS tone chip + confidence + probability bars), AI findings list, decision status, **Approve** and **Relabel** actions |
+| Validation panel | AI assessment (hero BI-RADS tone chip + description, confidence meter, de-emphasized alternative probability bars), AI findings list, radiologist decision state (**Currently approved** / Relabeled), **Approve BI-RADS X** / **Update decision** and **Relabel** actions |
 | Relabel dialog | BI-RADS **0–6 (4A/4B/4C)** grid **or** 3-class triage (Normal / Benign / Malignant) + free-text notes (500 chars) |
 | Queue | Thumbnail worklist with per-case decision markers (approved ✓ / relabelled flag / sync spinner) |
 | Shortcuts | `A` approve · `R` relabel · `←`/`→` navigate · `Home`/`End` jump · `Esc` close dialog |
@@ -241,8 +241,12 @@ a spiculated mass with pleomorphic calcifications).
 - The validation log is an **in-memory module store** — swap
   `lib/server-validation-store.ts` for a DB / FHIR / DICOM-SR repository
   without touching routes or the client.
-- `radiologistId` is a fixed demo reviewer (`lib/config.ts`); wire it to the
-  SSO/session token in production.
+- Reviewer identity is collected on first run before the workbench loads.
+- The profile contains name, specialty, and a reviewer ID; the ID is
+  auto-generated (`RAD-<year>-<nnnn>`) but editable.
+- The profile is persisted per browser using `localStorage`
+  (`mammoqa.reviewer`), so it survives reloads.
+- A reviewer can switch profiles from the header (returns to the setup screen).
 - Demo DICOMs are uncompressed — web workers / compressed codecs are not
   exercised.
 - Multi-frame stacks and hanging protocols are not part of this demo, but the

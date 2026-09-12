@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, Inbox, RefreshCw } from 'lucide-react';
 import { useValidationShortcuts } from '@/hooks/useValidationShortcuts';
 import { PatientHeader } from '@/components/header/PatientHeader';
@@ -8,6 +8,7 @@ import { QueueRail } from '@/components/queue/QueueRail';
 import { ImageViewer } from '@/components/viewer/ImageViewer';
 import { ValidationPanel } from '@/components/panel/ValidationPanel';
 import { RelabelModal } from '@/components/relabel/RelabelModal';
+import { ReviewerSetup } from '@/components/setup/ReviewerSetup';
 import { ShortcutFooter } from '@/components/layout/ShortcutFooter';
 import { Notice, SyncProgressStrip } from '@/components/layout/Notice';
 import {
@@ -63,12 +64,38 @@ export function Workbench() {
   const casesError = useWorkbenchStore((state) => state.casesError);
   const caseCount = useWorkbenchStore((state) => state.cases.length);
   const active = useWorkbenchStore(selectActiveCase);
+  const reviewer = useWorkbenchStore((state) => state.reviewer);
+  const restoreReviewer = useWorkbenchStore((state) => state.restoreReviewer);
+
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    restoreReviewer();
+    setReady(true);
+  }, [restoreReviewer]);
 
   useValidationShortcuts();
 
   useEffect(() => {
-    void loadCases();
-  }, [loadCases]);
+    if (reviewer !== null) {
+      void loadCases();
+    }
+  }, [loadCases, reviewer]);
+
+  if (!ready) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-slate-950 p-8 text-slate-200 antialiased">
+        <span className="size-8 animate-spin rounded-full border-2 border-slate-700 border-t-sky-400" />
+        <p className="text-sm font-semibold text-slate-200">
+          Preparing workbench…
+        </p>
+      </div>
+    );
+  }
+
+  if (reviewer === null) {
+    return <ReviewerSetup />;
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-950 text-slate-200 antialiased">

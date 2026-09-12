@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { StudyCase } from '@/lib/types';
 import type { ViewerPhase, ZoomRequest } from './ImageViewer';
 
@@ -56,8 +56,6 @@ export function PngImageViewer({
   const displayRef = useRef({ brightness, contrast });
   const onZoomChangeRef = useRef(onZoomChange);
 
-  const [zoomPct, setZoomPct] = useState(100);
-
   /* Keep the callback in a ref so `draw` stays referentially stable. */
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange;
@@ -106,7 +104,6 @@ export function PngImageViewer({
     ctx.filter = 'none';
 
     const pct = Math.round((cam.sx / cam.fitScale) * 100);
-    setZoomPct((prev) => (prev === pct ? prev : pct));
     onZoomChangeRef.current(pct);
   }, []);
 
@@ -272,9 +269,6 @@ export function PngImageViewer({
         ref={canvasRef}
         className="h-full w-full cursor-grab active:cursor-grabbing"
       />
-      <div className="pointer-events-none absolute bottom-14 left-3 rounded bg-slate-950/60 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 backdrop-blur">
-        {zoomPct}%
-      </div>
     </div>
   );
 }

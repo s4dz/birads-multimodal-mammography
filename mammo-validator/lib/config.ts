@@ -12,11 +12,13 @@ export const APP_CONFIG = {
   version: '0.1.0',
 } as const;
 
-export const RADIOLOGIST = {
-  id: 'RAD-2026-0142',
-  name: 'Dr. Priya Raman',
-  specialty: 'Breast Imaging',
-} as const;
+export type ReviewerProfile = {
+  id: string;
+  name: string;
+  specialty: string;
+};
+
+export const REVIEWER_STORAGE_KEY = 'mammoqa.reviewer';
 
 export const API_ENDPOINTS = {
   cases: '/api/cases',

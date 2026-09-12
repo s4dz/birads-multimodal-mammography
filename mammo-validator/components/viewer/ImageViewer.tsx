@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, LoaderCircle } from 'lucide-react';
+import { AlertTriangle, LoaderCircle } from 'lucide-react';
 import type { StudyCase } from '@/lib/types';
 import { DicomViewer } from './DicomViewer';
 import { PngImageViewer } from './PngImageViewer';
@@ -44,28 +44,33 @@ export function StageStatus({ phase }: { phase: ViewerPhase }) {
       </div>
     );
   }
-  return (
-    <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300 ring-1 ring-inset ring-emerald-400/30">
-      <CheckCircle2 className="size-3" /> rendered
-    </div>
-  );
+  return null;
 }
 
 /** Watermark annotation in the top-left of the stage. */
 function StageAnnotation({ caseStudy }: { caseStudy: StudyCase }) {
   return (
     <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-start gap-2">
-      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950/70 font-mono text-lg font-black text-sky-200 ring-1 ring-inset ring-white/10 backdrop-blur">
+      <div className="flex size-8 items-center justify-center rounded-lg bg-slate-950/70 font-mono text-base font-black text-sky-200 backdrop-blur">
         {caseStudy.acquisition.laterality}
       </div>
-      <div className="rounded-lg bg-slate-950/70 px-2.5 py-1.5 text-[11px] leading-tight text-slate-300 ring-1 ring-inset ring-white/10 backdrop-blur">
+      <div className="rounded-lg bg-slate-950/70 px-2.5 py-1.5 text-[11px] leading-tight text-slate-300 backdrop-blur">
         <div className="font-semibold">
           {caseStudy.acquisition.view} view · {caseStudy.study.description}
         </div>
-        <div className="font-mono text-[10px] text-slate-500">
-          {caseStudy.image.type === 'dicom' ? 'Native DICOM · Cornerstone3D' : 'Web image · canvas'}
-        </div>
       </div>
+    </div>
+  );
+}
+
+/** Subtle bottom-right metadata overlay (format caption + usage hint). */
+function StageMetadata({ formatCaption }: { formatCaption?: string }) {
+  if (!formatCaption) return null;
+  return (
+    <div className="pointer-events-none absolute bottom-3 right-3 z-10 text-[10px] leading-relaxed text-slate-500">
+      <span className="font-mono">{formatCaption}</span>
+      <span className="mx-1.5 hidden text-slate-700 xl:inline">·</span>
+      <span className="hidden xl:inline">drag to pan · scroll to zoom</span>
     </div>
   );
 }
@@ -127,6 +132,7 @@ export function ImageViewer({ caseStudy }: ImageViewerProps) {
 
       <StageAnnotation caseStudy={caseStudy} />
       <StageStatus phase={phase} />
+      <StageMetadata formatCaption={formatCaption} />
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
         <div className="pointer-events-auto">
@@ -139,7 +145,6 @@ export function ImageViewer({ caseStudy }: ImageViewerProps) {
             onZoomIn={() => requestZoom(1.25)}
             onZoomOut={() => requestZoom(0.8)}
             onReset={handleReset}
-            formatCaption={formatCaption}
           />
         </div>
       </div>

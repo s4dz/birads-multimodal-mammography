@@ -35,7 +35,7 @@ export function ShortcutFooter() {
           {reviewed}/{cases.length || 0} reviewed
         </span>
         <span className="text-emerald-400">{approved} approved</span>
-        <span className="text-amber-400">{relabelled} relabelled</span>
+        <span className="text-amber-400">{relabelled} relabeled</span>
         {reviewed > 0 && reviewed === cases.length ? (
           <span className="rounded bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
             Worklist complete
@@ -55,8 +55,8 @@ export function ShortcutFooter() {
           <Kbd>→</Kbd> view
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <Kbd>⇧←</Kbd>
-          <Kbd>⇧→</Kbd> patient
+          <Kbd>↑</Kbd>
+          <Kbd>↓</Kbd> patient
         </span>
       </div>
 
@@ -67,7 +67,7 @@ export function ShortcutFooter() {
           onClick={goToPrevPatientGroup}
           disabled={!canPrevPatient}
           className="h-7 px-2 text-xs opacity-60 hover:opacity-100"
-          title="Previous patient (Shift+←)"
+          title="Previous patient (↑)"
         >
           <ChevronLeft className="size-3.5" />
         </Button>
@@ -100,7 +100,7 @@ export function ShortcutFooter() {
           onClick={goToNextPatientGroup}
           disabled={!canNextPatient}
           className="h-7 px-2 text-xs opacity-60 hover:opacity-100"
-          title="Next patient (Shift+→)"
+          title="Next patient (↓)"
         >
           <ChevronRight className="size-3.5" />
         </Button>

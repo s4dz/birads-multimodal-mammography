@@ -1,19 +1,73 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   ChevronDown,
   Flag,
   LoaderCircle,
   Search,
-  Users,
   X,
 } from 'lucide-react';
 import { useWorkbenchStore } from '@/store/workbench-store';
 import { usePatientGroups } from '@/hooks/usePatientGroups';
 import type { PatientGroup } from '@/hooks/usePatientGroups';
 import type { StudyCase, SyncState, ValidationRecord } from '@/lib/types';
+
+type GroupReviewStatus = 'awaiting' | 'approved' | 'relabelled' | 'saving';
+
+type ListFilter = 'all' | 'awaiting' | 'approved' | 'relabelled';
+
+function groupStatus(
+  group: PatientGroup,
+  recordByImageId: Record<string, ValidationRecord>,
+  syncByImageId: Record<string, SyncState>,
+): GroupReviewStatus {
+  for (const c of group.cases) {
+    if (syncByImageId[c.imageId] === 'pending') return 'saving';
+  }
+  for (const c of group.cases) {
+    const rec = recordByImageId[c.imageId];
+    if (rec?.status === 'APPROVED') return 'approved';
+    if (rec?.status === 'RELABELED') return 'relabelled';
+  }
+  return 'awaiting';
+}
+
+const STATUS_STYLES: Record<GroupReviewStatus, string> = {
+  awaiting:
+    'bg-white/5 text-slate-400 ring-white/10',
+  approved:
+    'bg-emerald-500/10 text-emerald-300 ring-emerald-400/30',
+  relabelled:
+    'bg-amber-500/10 text-amber-300 ring-amber-400/30',
+  saving:
+    'bg-sky-500/10 text-sky-300 ring-sky-400/30',
+};
+
+function StatusChip({ status }: { status: GroupReviewStatus }) {
+  const label =
+    status === 'awaiting'
+      ? 'Pending'
+      : status === 'approved'
+        ? 'Approved'
+        : status === 'relabelled'
+          ? 'Relabeled'
+          : 'Saving…';
+  return (
+    <span
+      className={[
+        'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset',
+        STATUS_STYLES[status],
+      ].join(' ')}
+    >
+      {status === 'saving' ? (
+        <LoaderCircle className="size-2.5 animate-spin" />
+      ) : null}
+      {label}
+    </span>
+  );
+}
 
 function DecisionIcon({
   record,
@@ -109,6 +163,7 @@ function ViewItem({
 function PatientGroupItem({
   group,
   activeIndex,
+  status,
   forceExpand,
   recordByImageId,
   syncByImageId,
@@ -116,7 +171,7 @@ function PatientGroupItem({
 }: {
   group: PatientGroup;
   activeIndex: number;
-  /** True while a search is active — every match is opened for review. */
+  status: GroupReviewStatus;
   forceExpand: boolean;
   recordByImageId: Record<string, ValidationRecord>;
   syncByImageId: Record<string, SyncState>;
@@ -124,23 +179,15 @@ function PatientGroupItem({
 }) {
   const isActiveGroup =
     activeIndex >= group.startIndex && activeIndex <= group.endIndex;
-  // Collapsed by default so the rail stays fast with hundreds of patients.
   const [isExpanded, setIsExpanded] = useState(isActiveGroup);
 
-  // Re-open the patient under review (and any search hit).
   useEffect(() => {
     if (isActiveGroup || forceExpand) setIsExpanded(true);
   }, [isActiveGroup, forceExpand]);
 
-  const completedViews = group.cases.filter(
-    (c) => recordByImageId[c.imageId]?.status === 'APPROVED'
-  ).length;
-  const relabeledViews = group.cases.filter(
-    (c) => recordByImageId[c.imageId]?.status === 'RELABELED'
-  ).length;
-  const pendingViews = group.cases.filter(
-    (c) => syncByImageId[c.imageId] === 'pending'
-  ).length;
+  const shortId = group.patient.id.length > 12
+    ? `${group.patient.id.slice(0, 12)}…`
+    : group.patient.id;
 
   return (
     <>
@@ -149,47 +196,34 @@ function PatientGroupItem({
         onClick={() => setIsExpanded(!isExpanded)}
         title={group.patient.id}
         className={[
-          'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 transition-colors',
-          isActiveGroup ? 'bg-sky-500/10' : 'hover:bg-white/[0.03]',
+          'flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors',
+          isActiveGroup
+            ? 'border-l-2 border-sky-400 bg-sky-500/15 pl-1.5 ring-1 ring-inset ring-sky-400/25'
+            : 'border-l-2 border-transparent hover:bg-white/[0.03]',
         ].join(' ')}
       >
         <ChevronDown
           className={`size-4 shrink-0 text-slate-500 transition-transform ${isExpanded ? '' : '-rotate-90'}`}
         />
-        <Users className="size-4 shrink-0 text-slate-500" />
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate font-mono text-xs font-medium text-slate-200">
-              {group.patient.id}
-            </span>
-            <span className="shrink-0 text-[10px] text-slate-500">
-              {group.patient.sex}, {group.patient.ageAtStudy ?? '—'}y
-            </span>
+          <div
+            className={[
+              'truncate font-mono text-xs font-semibold',
+              isActiveGroup ? 'text-sky-300' : 'text-slate-200',
+            ].join(' ')}
+          >
+            {shortId}
           </div>
-          <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
-            <span className="flex items-center gap-1">
-              <span
-                className={`size-1.5 rounded-full ${completedViews > 0 ? 'bg-emerald-500' : 'bg-slate-700'}`}
-              />
-              {completedViews} approved
+          <div className="mt-0.5 text-[10px] text-slate-500">
+            {group.patient.sex} · {group.patient.ageAtStudy ?? '—'}y
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <StatusChip status={status} />
+            <span className="text-[10px] text-slate-600">
+              {group.cases.length} views
             </span>
-            {relabeledViews > 0 && (
-              <span className="flex items-center gap-1">
-                <span className="size-1.5 rounded-full bg-amber-500" />
-                {relabeledViews} relabeled
-              </span>
-            )}
-            {pendingViews > 0 && (
-              <span className="flex items-center gap-1">
-                <span className="size-1.5 animate-pulse rounded-full bg-sky-500" />
-                {pendingViews} pending
-              </span>
-            )}
           </div>
         </div>
-        <span className="shrink-0 font-mono text-[9px] text-slate-600">
-          {group.cases.length} views
-        </span>
       </button>
 
       {isExpanded && (
@@ -214,7 +248,7 @@ function PatientGroupItem({
   );
 }
 
-/** Left-hand worklist: searchable patient groups with per-view previews. */
+/** Left-hand worklist: searchable + filterable patient groups with per-view previews. */
 export function QueueRail() {
   const cases = useWorkbenchStore((state) => state.cases);
   const activeIndex = useWorkbenchStore((state) => state.activeIndex);
@@ -224,20 +258,62 @@ export function QueueRail() {
   const patientGroups = usePatientGroups(cases);
 
   const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<ListFilter>('all');
   const needle = query.trim().toLowerCase();
-  const visibleGroups = needle
-    ? patientGroups.filter((group) =>
-        group.patient.id.toLowerCase().includes(needle)
-      )
-    : patientGroups;
+
+  // One status pass over all groups, recomputed only when inputs change.
+  const groupStatuses = useMemo(
+    () =>
+      Object.fromEntries(
+        patientGroups.map((group) => [
+          group.patientId,
+          groupStatus(group, recordByImageId, syncByImageId),
+        ]),
+      ) as Record<string, GroupReviewStatus>,
+    [patientGroups, recordByImageId, syncByImageId],
+  );
+
+  const visibleGroups = patientGroups.filter((group) => {
+    const matchesQuery =
+      !needle || group.patient.id.toLowerCase().includes(needle);
+    const matchesFilter =
+      filter === 'all' || groupStatuses[group.patientId] === filter;
+    return matchesQuery && matchesFilter;
+  });
+
+  const FILTERS: Array<{ key: ListFilter; label: string }> = [
+    { key: 'all', label: 'All' },
+    { key: 'awaiting', label: 'Pending' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'relabelled', label: 'Relabeled' },
+  ];
 
   return (
-    <aside className="flex w-52 shrink-0 flex-col border-r border-slate-800 bg-slate-950/60">
+    <aside className="flex w-72 shrink-0 flex-col border-r border-slate-800 bg-slate-950/60">
       <div className="flex items-center justify-between gap-2 border-b border-slate-800/70 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
         <span>Patients · {patientGroups.length}</span>
         <span className="font-mono text-[10px] normal-case text-slate-600">
           {cases.length} views
         </span>
+      </div>
+
+      {/* Review-status filter */}
+      <div className="flex items-center gap-0.5 border-b border-slate-800/70 px-2 py-1.5">
+        {FILTERS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setFilter(key)}
+            className={[
+              'flex-1 rounded-md px-2 py-1 text-[10px] font-semibold transition-colors',
+              filter === key
+                ? 'bg-sky-500/15 text-sky-300'
+                : 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-300',
+            ].join(' ')}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="border-b border-slate-800/70 p-2">
@@ -269,12 +345,14 @@ export function QueueRail() {
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         {cases.length === 0 ? (
           <p className="px-1 text-xs text-slate-600">Empty worklist</p>
         ) : visibleGroups.length === 0 ? (
           <p className="px-1 text-xs text-slate-600">
-            No patient matches that ID.
+            {needle
+              ? 'No patient matches that ID.'
+              : 'No patients match this filter.'}
           </p>
         ) : (
           <>
@@ -283,6 +361,7 @@ export function QueueRail() {
                 key={group.patientId}
                 group={group}
                 activeIndex={activeIndex}
+                status={groupStatuses[group.patientId]}
                 forceExpand={Boolean(needle)}
                 recordByImageId={recordByImageId}
                 syncByImageId={syncByImageId}

@@ -3,7 +3,6 @@
 import {
   Contrast,
   RotateCcw,
-  ScanLine,
   SunMedium,
   ZoomIn,
   ZoomOut,
@@ -73,8 +72,6 @@ interface ViewerToolbarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onReset: () => void;
-  /** e.g. "1024×1024 · 8-bit PNG". */
-  formatCaption?: string;
 }
 
 /**
@@ -93,7 +90,6 @@ export function ViewerToolbar({
   onZoomIn,
   onZoomOut,
   onReset,
-  formatCaption,
 }: ViewerToolbarProps) {
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-lg border border-slate-700/80 bg-slate-950/85 px-3 py-1.5 shadow-2xl backdrop-blur">
@@ -152,16 +148,6 @@ export function ViewerToolbar({
         <RotateCcw className="size-3.5" />
         Reset
       </button>
-
-      <div className="hidden items-center gap-1.5 pl-1 text-[11px] text-slate-500 xl:flex">
-        <ScanLine className="size-3.5 shrink-0" />
-        <span className="truncate">drag to pan · scroll to zoom</span>
-        {formatCaption ? (
-          <span className="ml-1 shrink-0 rounded bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
-            {formatCaption}
-          </span>
-        ) : null}
-      </div>
     </div>
   );
 }

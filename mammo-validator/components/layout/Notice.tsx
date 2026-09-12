@@ -36,7 +36,7 @@ export function Notice() {
   const Icon = ICONS[notice.kind];
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center px-4">
+    <div className="pointer-events-none fixed left-72 right-80 top-16 z-40 flex justify-center px-4 xl:right-96">
       <div
         key={notice.id}
         className="pointer-events-auto flex max-w-xl items-center gap-3 rounded-lg border border-slate-700 bg-slate-900/95 px-4 py-2.5 text-sm shadow-2xl backdrop-blur"

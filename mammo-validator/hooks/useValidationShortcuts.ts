@@ -9,7 +9,8 @@ import { useWorkbenchStore, selectActivePatientGroup } from '@/store/workbench-s
  *   A                      approve the AI label for the active image
  *   R                      open the relabel dialog
  *   ← / →                  navigate views within current patient
- *   Shift+← / Shift+→      navigate between patients
+ *   ↑ / ↓                  navigate between patients
+ *   (Shift+↑ / Shift+↓ and Shift+← / Shift+→ are aliases)
  *   Home / End             jump to first / last image (global)
  *
  * Typing inside inputs/textareas and the relabel modal (which has its own
@@ -53,6 +54,14 @@ export function useValidationShortcuts(): void {
         case 'R':
           event.preventDefault();
           store.openRelabel();
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          store.goToPrevPatientGroup();
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          store.goToNextPatientGroup();
           break;
         case 'ArrowLeft':
           event.preventDefault();

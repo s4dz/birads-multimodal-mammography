@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { RADIOLOGIST } from '@/lib/config';
+import {
+  REVIEWER_STORAGE_KEY,
+  type ReviewerProfile,
+} from '@/lib/config';
 import { biradsAuditLabel } from '@/lib/taxonomy';
 import type {
   StudyCase,
@@ -34,6 +37,9 @@ interface WorkbenchState {
 
   activeIndex: number;
 
+  /** Reviewer identity for the current session (persisted in localStorage). */
+  reviewer: ReviewerProfile | null;
+
   /** Latest decision per image id (source of truth for the side panel). */
   recordByImageId: Record<string, ValidationRecord>;
   /** Server sync state per image id. */
@@ -49,12 +55,28 @@ interface WorkbenchState {
   goToNextPatientGroup: () => void;
   goToPrevPatientGroup: () => void;
 
+  setReviewer: (profile: ReviewerProfile) => void;
+  restoreReviewer: () => void;
+  clearReviewer: () => void;
+
   approveActive: () => Promise<void>;
   relabelActive: (finalLabel: string, notes: string) => Promise<void>;
   openRelabel: () => void;
   closeRelabel: () => void;
 
   dismissNotice: () => void;
+}
+
+function isReviewerProfile(value: unknown): value is ReviewerProfile {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === 'string' &&
+    candidate.id.length > 0 &&
+    typeof candidate.name === 'string' &&
+    candidate.name.length > 0 &&
+    typeof candidate.specialty === 'string'
+  );
 }
 
 let noticeSequence = 0;
@@ -64,61 +86,93 @@ function makeNotice(kind: NoticeKind, text: string): NoticeMessage {
   return { id: noticeSequence, kind, text };
 }
 
-function buildRecord(
-  active: StudyCase,
+/**
+ * Build one decision record per view in a patient group. status, finalLabel,
+ * notes, radiologistId and timestamp are shared across the exam; originalLabel
+ * stays per-view (each image carries its own AI BI-RADS label).
+ */
+function buildGroupRecords(
+  cases: StudyCase[],
   status: ValidationRecord['status'],
   finalLabel: string,
-  notes: string
-): ValidationRecord {
-  return {
-    imageId: active.imageId,
-    radiologistId: RADIOLOGIST.id,
-    originalLabel: biradsAuditLabel(active.ai.biradsGrade),
+  notes: string,
+  radiologistId: string
+): ValidationRecord[] {
+  const timestamp = new Date().toISOString();
+  return cases.map((c) => ({
+    imageId: c.imageId,
+    radiologistId,
+    originalLabel: biradsAuditLabel(c.ai.biradsGrade),
     finalLabel,
     status,
     notes,
-    timestamp: new Date().toISOString(),
-  };
+    timestamp,
+  }));
 }
 
 export const useWorkbenchStore = create<WorkbenchState>()(
   subscribeWithSelector((set, get) => {
   /** Shared optimistic commit + server POST helper for approve / relabel. */
-  async function commitDecision(record: ValidationRecord): Promise<void> {
-    const { imageId } = record;
-    set((state) => ({
-      recordByImageId: { ...state.recordByImageId, [imageId]: record },
-      syncByImageId: { ...state.syncByImageId, [imageId]: 'pending' },
-      isRelabelOpen: false,
-      notice: makeNotice(
-        'success',
-        record.status === 'APPROVED'
-          ? `Approved AI label for ${imageId}`
-          : `Relabelled ${imageId} → ${record.finalLabel}`
-      ),
-    }));
+  async function commitDecision(records: ValidationRecord[]): Promise<void> {
+    const { submitValidation } = await import('@/lib/api-client');
+    const imageIds = records.map((r) => r.imageId);
+    set((state) => {
+      const recordByImageId = { ...state.recordByImageId };
+      const syncByImageId = { ...state.syncByImageId };
+      for (const record of records) {
+        recordByImageId[record.imageId] = record;
+        syncByImageId[record.imageId] = 'pending';
+      }
+      return {
+        recordByImageId,
+        syncByImageId,
+        isRelabelOpen: false,
+        notice: makeNotice(
+          'success',
+          records.length === 1
+            ? records[0].status === 'APPROVED'
+              ? `Approved AI label for ${records[0].imageId}`
+              : `Relabeled ${records[0].imageId} → ${records[0].finalLabel}`
+            : records[0].status === 'APPROVED'
+              ? `Approved AI label for patient · ${records.length} views`
+              : `Relabeled patient → ${records[0].finalLabel} · ${records.length} views`
+        ),
+      };
+    });
 
     try {
-      const { submitValidation } = await import('@/lib/api-client');
-      const response = await submitValidation(record);
-      if (!response.ok) {
+      const responses = await Promise.all(
+        records.map((record) => submitValidation(record))
+      );
+      const failed = responses.find((response) => !response.ok);
+      if (failed) {
         throw new Error(
-          response.message ?? 'Validation API rejected the record.'
+          failed.message ?? 'Validation API rejected the record.'
         );
       }
-      set((state) => ({
-        syncByImageId: { ...state.syncByImageId, [imageId]: 'synced' },
-      }));
+      set((state) => {
+        const syncByImageId = { ...state.syncByImageId };
+        for (const imageId of imageIds) {
+          syncByImageId[imageId] = 'synced';
+        }
+        return { syncByImageId };
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Network error while syncing.';
-      set((state) => ({
-        syncByImageId: { ...state.syncByImageId, [imageId]: 'error' },
-        notice: makeNotice(
-          'error',
-          `Decision kept locally, but sync failed: ${message}`
-        ),
-      }));
+      set((state) => {
+        const syncByImageId = { ...state.syncByImageId };
+        for (const imageId of imageIds) {
+          syncByImageId[imageId] = 'error';
+        }
+        return {
+          syncByImageId,
+          notice: makeNotice(
+            'error',
+            `Decision kept locally, but sync failed: ${message}`
+          ),
+        };
+      });
     }
   }
 
@@ -127,10 +181,42 @@ export const useWorkbenchStore = create<WorkbenchState>()(
     isLoadingCases: false,
     casesError: null,
     activeIndex: 0,
+    reviewer: null,
     recordByImageId: {},
     syncByImageId: {},
     isRelabelOpen: false,
     notice: null,
+
+    setReviewer: (profile) => {
+      set({ reviewer: profile });
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          REVIEWER_STORAGE_KEY,
+          JSON.stringify(profile)
+        );
+      }
+    },
+
+    restoreReviewer: () => {
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem(REVIEWER_STORAGE_KEY);
+      if (!raw) return;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (isReviewerProfile(parsed)) {
+          set({ reviewer: parsed });
+        }
+      } catch {
+        // Corrupt entry — ignore and let the reviewer re-enter their profile.
+      }
+    },
+
+    clearReviewer: () => {
+      set({ reviewer: null });
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(REVIEWER_STORAGE_KEY);
+      }
+    },
 
     loadCases: async () => {
       if (get().isLoadingCases) return;
@@ -202,34 +288,47 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       if (activeGroup) {
         const activeGroupIdx = groups.indexOf(activeGroup);
         if (activeGroupIdx > 0) {
-          set({ activeIndex: groups[activeGroupIdx - 1].endIndex });
+          set({ activeIndex: groups[activeGroupIdx - 1].startIndex });
         }
       }
     },
 
     approveActive: async () => {
-      const { cases, activeIndex, syncByImageId } = get();
-      const active = cases[activeIndex];
-      if (!active) return;
-      if (syncByImageId[active.imageId] === 'pending') return;
+      const state = get();
+      const group = selectActivePatientGroup(state);
+      if (!group) return;
+      const cases = group.cases;
+      if (cases.some((c) => state.syncByImageId[c.imageId] === 'pending')) {
+        return;
+      }
 
-      const record = buildRecord(
-        active,
+      const records = buildGroupRecords(
+        cases,
         'APPROVED',
-        biradsAuditLabel(active.ai.biradsGrade),
-        ''
+        biradsAuditLabel(cases[state.activeIndex - group.startIndex].ai.biradsGrade),
+        '',
+        get().reviewer?.id ?? ''
       );
-      await commitDecision(record);
+      await commitDecision(records);
     },
 
     relabelActive: async (finalLabel, notes) => {
-      const { cases, activeIndex, syncByImageId } = get();
-      const active = cases[activeIndex];
-      if (!active) return;
-      if (syncByImageId[active.imageId] === 'pending') return;
+      const state = get();
+      const group = selectActivePatientGroup(state);
+      if (!group) return;
+      const cases = group.cases;
+      if (cases.some((c) => state.syncByImageId[c.imageId] === 'pending')) {
+        return;
+      }
 
-      const record = buildRecord(active, 'RELABELED', finalLabel, notes);
-      await commitDecision(record);
+      const records = buildGroupRecords(
+        cases,
+        'RELABELED',
+        finalLabel,
+        notes,
+        get().reviewer?.id ?? ''
+      );
+      await commitDecision(records);
     },
 
     openRelabel: () => {
