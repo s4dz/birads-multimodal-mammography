@@ -22,6 +22,8 @@ import {
   submitValidation,
 } from '@/lib/api-client';
 import { toneClasses } from '@/lib/taxonomy';
+import { useTranslation } from '@/lib/i18n/LanguageProvider';
+import type { TranslationKey } from '@/lib/i18n/dictionary';
 import { useWorkbenchStore } from '@/store/workbench-store';
 import type {
   DensityChoice,
@@ -43,25 +45,35 @@ import type {
 /** The three classes the model was trained on (BI-RADS collapsed). */
 const CLASS_INFO: {
   key: 'normal' | 'benignLeaning' | 'suspicious';
-  label: string;
+  labelKey: TranslationKey;
   range: string;
   tone: Tone;
 }[] = [
-  { key: 'normal', label: 'Normal', range: 'BI-RADS 1', tone: 'positive' },
+  {
+    key: 'normal',
+    labelKey: 'predict.classNormal',
+    range: 'BI-RADS 1',
+    tone: 'positive',
+  },
   {
     key: 'benignLeaning',
-    label: 'Benign-leaning',
+    labelKey: 'predict.classBenign',
     range: 'BI-RADS 2-3',
     tone: 'watch',
   },
-  { key: 'suspicious', label: 'Suspicious', range: 'BI-RADS 4-5', tone: 'critical' },
+  {
+    key: 'suspicious',
+    labelKey: 'predict.classSuspicious',
+    range: 'BI-RADS 4-5',
+    tone: 'critical',
+  },
 ];
 
-const DENSITY_OPTIONS: { value: DensityChoice; label: string }[] = [
-  { value: 'A', label: 'A — mostly fatty' },
-  { value: 'B', label: 'B — scattered fibroglandular' },
-  { value: 'C', label: 'C — heterogeneously dense' },
-  { value: 'D', label: 'D — extremely dense' },
+const DENSITY_OPTIONS: { value: DensityChoice; labelKey: TranslationKey }[] = [
+  { value: 'A', labelKey: 'predict.densityA' },
+  { value: 'B', labelKey: 'predict.densityB' },
+  { value: 'C', labelKey: 'predict.densityC' },
+  { value: 'D', labelKey: 'predict.densityD' },
 ];
 
 const ACCEPTED_TYPES = '.png,.jpg,.jpeg,.dcm,.dicom';
@@ -181,13 +193,16 @@ function FoldRow({
   label: number;
   probabilities: number[];
 }) {
+  const { t } = useTranslation();
   return (
     <li className="flex items-center justify-between gap-2 rounded-md bg-white/[0.03] px-2 py-1 text-[11px]">
       <span className="font-mono text-slate-500">fold {fold}</span>
       <span className="font-mono text-slate-400">
         {probabilities.map((p) => `${Math.round(p * 100)}`).join(' / ')}
       </span>
-      <span className="text-slate-300">{CLASS_INFO[label]?.label ?? '—'}</span>
+      <span className="text-slate-300">
+        {CLASS_INFO[label] ? t(CLASS_INFO[label].labelKey) : '—'}
+      </span>
     </li>
   );
 }
@@ -212,14 +227,16 @@ function ResultPanel({
   result: PredictResponse | null;
   approval: ApprovalState;
 }) {
+  const { t } = useTranslation();
   if (!result) {
     return (
       <aside className="flex w-96 shrink-0 flex-col items-center justify-center gap-3 border-l border-slate-800 bg-slate-900/40 p-8 text-center">
         <FileScan className="size-8 text-slate-600" />
-        <p className="text-sm font-semibold text-slate-300">No prediction yet</p>
+        <p className="text-sm font-semibold text-slate-300">
+          {t('predict.noResultTitle')}
+        </p>
         <p className="max-w-56 text-xs leading-relaxed text-slate-500">
-          Choose a PNG or DICOM mammogram, fill in the clinical inputs and run the
-          model to see its BI-RADS assessment.
+          {t('predict.noResultHint')}
         </p>
       </aside>
     );
@@ -235,14 +252,16 @@ function ResultPanel({
           className={`rounded-xl border border-slate-700/60 p-4 ring-1 ring-inset ${topClasses.badge}`}
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
-            Predicted assessment
+            {t('predict.predictedAssessment')}
           </p>
-          <p className="mt-1 text-2xl font-black leading-tight">{top.label}</p>
+          <p className="mt-1 text-2xl font-black leading-tight">
+            {t(top.labelKey)}
+          </p>
           <p className="mt-0.5 font-mono text-xs opacity-90">
             {result.biradsRange}
           </p>
           <p className="mt-2 text-[11px] opacity-90">
-            Ensemble confidence{' '}
+            {t('predict.ensembleConfidence')}{' '}
             <span className="font-mono">
               {Math.round(result.confidence * 100)}%
             </span>
@@ -251,13 +270,13 @@ function ResultPanel({
 
         <section className="space-y-2.5">
           <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Class probabilities
+            {t('predict.classProbabilities')}
           </h2>
           <ul className="space-y-2.5">
             {CLASS_INFO.map((info, index) => (
               <ProbabilityBar
                 key={info.key}
-                label={info.label}
+                label={t(info.labelKey)}
                 range={info.range}
                 tone={info.tone}
                 value={result.probabilities[info.key]}
@@ -270,18 +289,16 @@ function ResultPanel({
         {approval.canApprove ? (
           <section className="space-y-2.5 rounded-xl border border-sky-500/30 bg-sky-500/[0.06] p-3">
             <h2 className="text-[11px] font-bold uppercase tracking-wider text-sky-300">
-              Radiologist sign-off
+              {t('predict.signoffTitle')}
             </h2>
             {approval.approvedImageId ? (
               <>
                 <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-emerald-200">
                   <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" />
                   <span>
-                    Label recorded for{' '}
-                    <span className="font-mono">
-                      {approval.approvedImageId}
-                    </span>
-                    . It now appears as approved in the worklist.
+                    {t('predict.approvedNote', {
+                      imageId: approval.approvedImageId,
+                    })}
                   </span>
                 </p>
                 {approval.backHref ? (
@@ -289,16 +306,14 @@ function ResultPanel({
                     href={approval.backHref}
                     className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-slate-800 text-xs font-semibold text-slate-100 ring-1 ring-inset ring-slate-700 transition-colors hover:bg-slate-700"
                   >
-                    Back to review
+                    {t('predict.backToReview')}
                   </Link>
                 ) : null}
               </>
             ) : (
               <>
                 <p className="text-[11px] leading-relaxed text-slate-400">
-                  Approving stores{' '}
-                  <span className="text-slate-200">{result.labelName}</span> as
-                  the reviewed label for this dataset image.
+                  {t('predict.signoffBody', { label: result.labelName })}
                 </p>
                 <Button
                   variant="success"
@@ -308,7 +323,9 @@ function ResultPanel({
                   leftIcon={<CheckCircle2 className="size-4" />}
                   onClick={approval.onApprove}
                 >
-                  {approval.isApproving ? 'Saving…' : 'Approve this label'}
+                  {approval.isApproving
+                    ? t('common.saving')
+                    : t('predict.approve')}
                 </Button>
               </>
             )}
@@ -323,7 +340,7 @@ function ResultPanel({
 
         <section className="space-y-2">
           <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Per-fold breakdown ({result.folds.length})
+            {t('predict.perFold', { count: result.folds.length })}
           </h2>
           <ul className="space-y-1">
             {result.folds.map((fold) => (
@@ -336,26 +353,27 @@ function ResultPanel({
             ))}
           </ul>
           <p className="text-[10px] leading-relaxed text-slate-600">
-            Numbers are percentages of Normal / Benign-leaning / Suspicious.
-            Disagreement between folds is expected near decision boundaries.
+            {t('predict.perFoldNote')}
           </p>
         </section>
 
         <section className="space-y-1 rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-[10px] leading-relaxed text-slate-500">
-          <p className="font-semibold text-slate-400">Model</p>
+          <p className="font-semibold text-slate-400">{t('predict.model')}</p>
           <p className="font-mono">{result.model}</p>
           <p className="font-mono">{result.modelVersion}</p>
           <p className="pt-1">
-            input: <span className="font-mono">{result.input.file}</span> · age{' '}
+            {t('predict.inputLabel')}:{' '}
+            <span className="font-mono">{result.input.file}</span> · age{' '}
             {result.input.age} · density code {result.input.densityCode}
           </p>
-          <p>inference: {result.elapsedMs} ms</p>
+          <p>
+            {t('predict.inference')}: {result.elapsedMs} ms
+          </p>
         </section>
 
         <p className="flex items-start gap-1.5 rounded-lg border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-[10px] leading-relaxed text-amber-200/90">
           <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-          Research model trained on VinDr-Mammo. Output is a 3-class collapse
-          (BI-RADS 1 / 2-3 / 4-5) and must not be used for diagnosis.
+          {t('predict.disclaimer')}
         </p>
       </div>
     </aside>
@@ -364,8 +382,9 @@ function ResultPanel({
 
 /** Mode 1 workspace: pick an image, set clinical inputs, run the ensemble. */
 export function PredictWorkbench() {
+  const { t } = useTranslation();
   const [samples, setSamples] = useState<string[]>([]);
-  const [workerNote, setWorkerNote] = useState('Connecting to the prediction worker…');
+  const [workerNote, setWorkerNote] = useState<string | null>(null);
   const [source, setSource] = useState<PredictionSource>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [age, setAge] = useState('55');
@@ -400,20 +419,24 @@ export function PredictWorkbench() {
         const worker = health.worker;
         setWorkerNote(
           worker && worker.loaded > 0
-            ? `${worker.loaded} fold model${worker.loaded === 1 ? '' : 's'} ready (folds ${worker.folds.join(', ')}, ${worker.selectedFeatures[0] ?? '?'} latent features)`
-            : (health.message ?? 'Prediction worker unavailable.')
+            ? t('predict.workerReady', {
+                count: worker.loaded,
+                folds: worker.folds.join(', '),
+                features: worker.selectedFeatures[0] ?? '?',
+              })
+            : (health.message ?? t('predict.workerUnavailable'))
         );
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         setWorkerNote(
-          err instanceof Error ? err.message : 'Prediction worker unavailable.'
+          err instanceof Error ? err.message : t('predict.workerUnavailable')
         );
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   /* Deep link from review mode: /predict?sample=…&imageId=…&from=review */
   useEffect(() => {
@@ -495,7 +518,7 @@ export function PredictWorkbench() {
     if (!source) return;
     const parsedAge = Number(age);
     if (!Number.isFinite(parsedAge) || parsedAge <= 0 || parsedAge > 120) {
-      setError('Enter a patient age between 1 and 120.');
+      setError(t('predict.ageError'));
       return;
     }
     setIsRunning(true);
@@ -508,7 +531,7 @@ export function PredictWorkbench() {
       setResult(prediction);
     } catch (err) {
       setResult(null);
-      setError(err instanceof Error ? err.message : 'Prediction failed.');
+      setError(err instanceof Error ? err.message : t('predict.failed'));
     } finally {
       setIsRunning(false);
     }
@@ -536,17 +559,17 @@ export function PredictWorkbench() {
       };
       const response = await submitValidation(record);
       if (!response.ok) {
-        throw new Error(response.message ?? 'The server rejected the label.');
+        throw new Error(response.message ?? t('predict.failed'));
       }
       setApprovedImageId(datasetImageId);
     } catch (err) {
       setApproveError(
-        err instanceof Error ? err.message : 'Could not save the label.'
+        err instanceof Error ? err.message : t('predict.saveFailed')
       );
     } finally {
       setIsApproving(false);
     }
-  }, [result, source, datasetImageId, reviewer]);
+  }, [result, source, datasetImageId, reviewer, t]);
 
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
@@ -565,7 +588,7 @@ export function PredictWorkbench() {
         <div className="space-y-4 p-4">
           <section className="space-y-2">
             <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              1 · Mammogram
+              1 · {t('predict.imageSection')}
             </h2>
 
             <div
@@ -584,7 +607,7 @@ export function PredictWorkbench() {
             >
               <Upload className="mx-auto size-6 text-slate-500" />
               <p className="mt-2 text-xs text-slate-400">
-                Drop a PNG or DICOM here
+                {t('predict.dropHint')}
               </p>
               <Button
                 variant="secondary"
@@ -592,7 +615,7 @@ export function PredictWorkbench() {
                 className="mt-2"
                 onClick={() => fileInputRef.current?.click()}
               >
-                Browse file
+                {t('predict.browse')}
               </Button>
               <input
                 ref={fileInputRef}
@@ -619,7 +642,7 @@ export function PredictWorkbench() {
                 <button
                   type="button"
                   onClick={clearSource}
-                  title="Clear selection"
+                  title={t('predict.clearSelection')}
                   className="inline-flex size-5 shrink-0 items-center justify-center rounded text-slate-500 transition-colors hover:text-slate-200"
                 >
                   <X className="size-3.5" />
@@ -630,7 +653,7 @@ export function PredictWorkbench() {
             {samples.length > 0 ? (
               <div className="space-y-1">
                 <p className="text-[10px] uppercase tracking-wider text-slate-600">
-                  or a bundled sample
+                  {t('predict.bundledSamples')}
                 </p>
                 <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
                   {samples.map((sample) => {
@@ -660,10 +683,10 @@ export function PredictWorkbench() {
 
           <section className="space-y-3">
             <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              2 · Clinical inputs
+              2 · {t('predict.clinicalSection')}
             </h2>
             <label className="block space-y-1">
-              <span className="text-xs text-slate-400">Patient age</span>
+              <span className="text-xs text-slate-400">{t('predict.age')}</span>
               <input
                 type="number"
                 min={1}
@@ -675,7 +698,7 @@ export function PredictWorkbench() {
             </label>
             <label className="block space-y-1">
               <span className="text-xs text-slate-400">
-                Breast density (BI-RADS)
+                {t('predict.density')}
               </span>
               <select
                 value={density}
@@ -686,14 +709,13 @@ export function PredictWorkbench() {
               >
                 {DENSITY_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {t(option.labelKey)}
                   </option>
                 ))}
               </select>
             </label>
             <p className="text-[10px] leading-relaxed text-slate-600">
-              Age and density are model inputs — they change the prediction, so
-              use the patient&apos;s real values.
+              {t('predict.inputsNote')}
             </p>
           </section>
 
@@ -707,12 +729,12 @@ export function PredictWorkbench() {
               leftIcon={<Play className="size-4" />}
               onClick={() => void runPrediction()}
             >
-              {isRunning ? 'Scoring…' : 'Run prediction'}
+              {isRunning ? t('predict.scoring') : t('predict.run')}
             </Button>
             {isRunning ? (
               <p className="flex items-center gap-1.5 text-[11px] text-slate-500">
                 <LoaderCircle className="size-3.5 animate-spin" />
-                Running the 4-fold ensemble — about 10-20s on CPU.
+                {t('predict.runningNote')}
               </p>
             ) : null}
             {error ? (
@@ -724,9 +746,11 @@ export function PredictWorkbench() {
           </section>
 
           <p className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-[10px] leading-relaxed text-slate-500">
-            <span className="font-semibold text-slate-400">Ensemble</span>
+            <span className="font-semibold text-slate-400">
+              {t('predict.ensemble')}
+            </span>
             <br />
-            {workerNote}
+            {workerNote ?? t('predict.connecting')}
           </p>
         </div>
       </aside>
@@ -741,19 +765,18 @@ export function PredictWorkbench() {
               badge: 'AI',
               title: fileName,
               subtitle: isDicomName(fileName)
-                ? 'Prediction input · DICOM'
-                : 'Prediction input · image',
+                ? t('predict.annotationDicom')
+                : t('predict.annotationImage'),
             }}
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
             <ImageIcon className="size-8 text-slate-600" />
             <p className="text-sm font-semibold text-slate-300">
-              No image selected
+              {t('predict.emptyTitle')}
             </p>
             <p className="max-w-sm text-xs leading-relaxed text-slate-500">
-              Upload a PNG/JPG or DICOM mammogram — or pick a bundled sample — to
-              score it with the model.
+              {t('predict.emptyHint')}
             </p>
           </div>
         )}

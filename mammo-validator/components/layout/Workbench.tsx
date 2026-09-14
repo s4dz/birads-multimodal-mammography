@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Inbox, RefreshCw, TriangleAlert } from 'lucide-react';
+import { useTranslation } from '@/lib/i18n/LanguageProvider';
 import { useValidationShortcuts } from '@/hooks/useValidationShortcuts';
 import { PatientHeader } from '@/components/header/PatientHeader';
 import { QueueRail } from '@/components/queue/QueueRail';
@@ -27,6 +28,7 @@ function CenterMessage({
   hint?: string;
   action?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
       {icon === 'loading' ? (
@@ -50,7 +52,7 @@ function CenterMessage({
           onClick={action}
           className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-700"
         >
-          <RefreshCw className="size-3.5" /> Retry
+          <RefreshCw className="size-3.5" /> {t('review.retry')}
         </button>
       ) : null}
     </div>
@@ -59,6 +61,7 @@ function CenterMessage({
 
 /** Root client layout for the validation session. */
 export function Workbench() {
+  const { t } = useTranslation();
   const loadCases = useWorkbenchStore((state) => state.loadCases);
   const isLoading = useWorkbenchStore((state) => state.isLoadingCases);
   const casesError = useWorkbenchStore((state) => state.casesError);
@@ -93,7 +96,7 @@ export function Workbench() {
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-slate-950 p-8 text-slate-200 antialiased">
         <span className="size-8 animate-spin rounded-full border-2 border-slate-700 border-t-sky-400" />
         <p className="text-sm font-semibold text-slate-200">
-          Preparing workbench…
+          {t('review.preparing')}
         </p>
       </div>
     );
@@ -119,16 +122,16 @@ export function Workbench() {
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-500/25 bg-amber-500/[0.07] px-4 py-1.5 text-[11px] text-amber-200">
           <TriangleAlert className="size-3.5 shrink-0" />
           <span>
-            {unlabeledPending.length} image
-            {unlabeledPending.length === 1 ? '' : 's'} in this dataset have no AI
-            label — open one, use “Predict this label”, then approve it.
+            {unlabeledPending.length === 1
+              ? t('review.unlabeledOne')
+              : t('review.unlabeledMany', { count: unlabeledPending.length })}
           </span>
           <button
             type="button"
             onClick={() => goToIndex(firstUnlabeledIndex)}
             className="rounded-md bg-amber-500/20 px-2 py-0.5 font-semibold text-amber-100 ring-1 ring-inset ring-amber-400/40 transition-colors hover:bg-amber-500/30"
           >
-            Jump to first
+            {t('review.jumpToFirst')}
           </button>
         </div>
       ) : null}
@@ -145,23 +148,21 @@ export function Workbench() {
           ) : isLoading ? (
             <CenterMessage
               icon="loading"
-              title="Loading worklist…"
-              hint="Fetching cases and AI predictions from /api/cases."
+              title={t('review.loadingWorklist')}
+              hint={t('review.loadingHint')}
             />
           ) : casesError ? (
             <CenterMessage
               icon="error"
-              title="Could not load the worklist"
+              title={t('review.loadError')}
               hint={casesError}
               action={() => void loadCases()}
             />
           ) : (
             <CenterMessage
               icon="empty"
-              title="No cases available"
-              hint={`The demo worklist contains no cases${
-                caseCount === 0 ? ' (0 items)' : ''
-              }. Run the sample-data generator or check /api/cases.`}
+              title={t('review.emptyTitle')}
+              hint={t('review.emptyHint')}
             />
           )}
         </main>

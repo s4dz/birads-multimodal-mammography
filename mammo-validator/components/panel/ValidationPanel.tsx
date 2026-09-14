@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Bot, Check, PenLine, ScanSearch } from 'lucide-react';
 import { Kbd } from '@/components/ui/Button';
+import { useTranslation } from '@/lib/i18n/LanguageProvider';
 import { ToneBadge } from '@/components/ui/Badge';
 import { biradsAuditLabel, biradsDescriptor, toneForLabel } from '@/lib/taxonomy';
 import {
@@ -194,6 +195,7 @@ function DecisionSummary({ record }: { record: ValidationRecord }) {
 }
 
 export function ValidationPanel() {
+  const { t } = useTranslation();
   const active = useWorkbenchStore(selectActiveCase);
   const decision = useWorkbenchStore((state) =>
     active ? selectDecisionFor(state, active.imageId) : undefined
@@ -225,21 +227,20 @@ export function ValidationPanel() {
             </div>
             <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4">
               <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300 ring-1 ring-inset ring-amber-400/30">
-                Unlabeled
+                {t('panel.unlabeled')}
               </span>
               <p className="mt-2 text-sm font-semibold text-slate-200">
-                No AI label for this image
+                {t('panel.noLabelTitle')}
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                This dataset image has not been scored yet. Run the model, check
-                its assessment, then approve the returned label.
+                {t('panel.noLabelBody')}
               </p>
               <Link
                 href={predictHref}
                 className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-sky-500 text-sm font-semibold text-white shadow-lg shadow-sky-950/40 transition-colors hover:bg-sky-400"
               >
                 <ScanSearch className="size-4" />
-                Predict this label
+                {t('panel.predictThisLabel')}
               </Link>
             </div>
           </section>
@@ -252,7 +253,7 @@ export function ValidationPanel() {
               <DecisionSummary record={decision} />
             ) : (
               <p className="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-center text-[11px] text-slate-600">
-                Predict a label first — you can then approve it
+                {t('panel.predictFirst')}
               </p>
             )}
           </section>
@@ -465,7 +466,7 @@ export function ValidationPanel() {
               className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-600 bg-slate-800/60 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-500 hover:bg-slate-700/70"
             >
               <PenLine className="size-4" />
-              Relabel image
+              {t('panel.relabelImage')}
               <Kbd>R</Kbd>
             </button>
           </div>

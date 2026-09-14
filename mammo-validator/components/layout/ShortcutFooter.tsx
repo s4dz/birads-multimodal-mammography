@@ -2,11 +2,13 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button, Kbd } from '@/components/ui/Button';
+import { useTranslation } from '@/lib/i18n/LanguageProvider';
 import { useWorkbenchStore } from '@/store/workbench-store';
 import { useActivePatientGroup } from '@/hooks/usePatientGroups';
 
 /** Bottom status/shortcut bar. */
 export function ShortcutFooter() {
+  const { t } = useTranslation();
   const cases = useWorkbenchStore((state) => state.cases);
   const activeIndex = useWorkbenchStore((state) => state.activeIndex);
   const goToPrev = useWorkbenchStore((state) => state.goToPrev);
@@ -32,31 +34,35 @@ export function ShortcutFooter() {
     <footer className="flex h-11 shrink-0 items-center justify-between gap-4 border-t border-slate-800 bg-slate-900/60 px-4">
       <div className="flex items-center gap-3 text-xs text-slate-400">
         <span className="font-semibold text-slate-200">
-          {reviewed}/{cases.length || 0} reviewed
+          {t('footer.reviewed', { done: reviewed, total: cases.length || 0 })}
         </span>
-        <span className="text-emerald-400">{approved} approved</span>
-        <span className="text-amber-400">{relabelled} relabeled</span>
+        <span className="text-emerald-400">
+          {t('footer.approved', { count: approved })}
+        </span>
+        <span className="text-amber-400">
+          {t('footer.relabeled', { count: relabelled })}
+        </span>
         {reviewed > 0 && reviewed === cases.length ? (
           <span className="rounded bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
-            Worklist complete
+            {t('footer.complete')}
           </span>
         ) : null}
       </div>
 
       <div className="hidden items-center gap-4 text-[11px] text-slate-500 md:flex">
         <span className="inline-flex items-center gap-1.5">
-          <Kbd>A</Kbd> approve
+          <Kbd>A</Kbd> {t('footer.approveKey')}
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <Kbd>R</Kbd> relabel
+          <Kbd>R</Kbd> {t('footer.relabelKey')}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <Kbd>←</Kbd>
-          <Kbd>→</Kbd> view
+          <Kbd>→</Kbd> {t('footer.viewKey')}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <Kbd>↑</Kbd>
-          <Kbd>↓</Kbd> patient
+          <Kbd>↓</Kbd> {t('footer.patientKey')}
         </span>
       </div>
 
@@ -67,7 +73,7 @@ export function ShortcutFooter() {
           onClick={goToPrevPatientGroup}
           disabled={!canPrevPatient}
           className="h-7 px-2 text-xs opacity-60 hover:opacity-100"
-          title="Previous patient (↑)"
+          title={t('footer.prevPatient')}
         >
           <ChevronLeft className="size-3.5" />
         </Button>
@@ -77,7 +83,7 @@ export function ShortcutFooter() {
           onClick={goToPrev}
           disabled={!canPrevView}
           className="h-7 px-2 text-xs"
-          title="Previous view (←)"
+          title={t('footer.prevView')}
         >
           <ChevronLeft className="size-3.5" />
         </Button>
@@ -90,7 +96,7 @@ export function ShortcutFooter() {
           onClick={goToNext}
           disabled={!canNextView}
           className="h-7 px-2 text-xs"
-          title="Next view (→)"
+          title={t('footer.nextView')}
         >
           <ChevronRight className="size-3.5" />
         </Button>
@@ -100,7 +106,7 @@ export function ShortcutFooter() {
           onClick={goToNextPatientGroup}
           disabled={!canNextPatient}
           className="h-7 px-2 text-xs opacity-60 hover:opacity-100"
-          title="Next patient (↓)"
+          title={t('footer.nextPatient')}
         >
           <ChevronRight className="size-3.5" />
         </Button>
