@@ -59,6 +59,9 @@ interface WorkbenchState {
   restoreReviewer: () => void;
   clearReviewer: () => void;
 
+  /** Pull decisions already recorded on the server into local state. */
+  hydrateDecisions: () => Promise<void>;
+
   approveActive: () => Promise<void>;
   relabelActive: (finalLabel: string, notes: string) => Promise<void>;
   openRelabel: () => void;
@@ -102,7 +105,7 @@ function buildGroupRecords(
   return cases.map((c) => ({
     imageId: c.imageId,
     radiologistId,
-    originalLabel: biradsAuditLabel(c.ai.biradsGrade),
+    originalLabel: c.needsPrediction ? 'Unlabeled' : biradsAuditLabel(c.ai.biradsGrade),
     finalLabel,
     status,
     notes,
@@ -218,6 +221,27 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       }
     },
 
+    hydrateDecisions: async () => {
+      try {
+        const { fetchValidationRecords } = await import('@/lib/api-client');
+        const records = await fetchValidationRecords();
+        if (records.length === 0) return;
+        set((state) => {
+          const recordByImageId = { ...state.recordByImageId };
+          const syncByImageId = { ...state.syncByImageId };
+          for (const record of records) {
+            // A decision currently being saved locally wins over the snapshot.
+            if (state.syncByImageId[record.imageId] === 'pending') continue;
+            recordByImageId[record.imageId] = record;
+            syncByImageId[record.imageId] = 'synced';
+          }
+          return { recordByImageId, syncByImageId };
+        });
+      } catch {
+        // The session log is a convenience: stay usable if it is unavailable.
+      }
+    },
+
     loadCases: async () => {
       if (get().isLoadingCases) return;
       set({ isLoadingCases: true, casesError: null });
@@ -231,9 +255,18 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         // patient-grouping logic (startIndex/endIndex) requires contiguity;
         // without it the same patient appears in multiple groups. Stable sort
         // preserves within-patient order (CSV order = flag confidence).
-        const cases = [...fetched].sort((a, b) =>
-          a.patient.id < b.patient.id ? -1 : a.patient.id > b.patient.id ? 1 : 0,
-        );
+        // Images that still need a model label come first: they are the
+        // outstanding work, and the main reason to open /predict.
+        const cases = [...fetched].sort((a, b) => {
+          if (Boolean(a.needsPrediction) !== Boolean(b.needsPrediction)) {
+            return a.needsPrediction ? -1 : 1;
+          }
+          return a.patient.id < b.patient.id
+            ? -1
+            : a.patient.id > b.patient.id
+              ? 1
+              : 0;
+        });
         set({ cases, isLoadingCases: false, activeIndex: 0 });
       } catch (error) {
         set({
@@ -302,10 +335,13 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         return;
       }
 
+      const anchor = cases[state.activeIndex - group.startIndex];
       const records = buildGroupRecords(
         cases,
         'APPROVED',
-        biradsAuditLabel(cases[state.activeIndex - group.startIndex].ai.biradsGrade),
+        anchor.needsPrediction
+          ? 'Unlabeled'
+          : biradsAuditLabel(anchor.ai.biradsGrade),
         '',
         get().reviewer?.id ?? ''
       );

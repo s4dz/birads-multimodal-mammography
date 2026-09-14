@@ -1,0 +1,8 @@
+# Inference dependencies for ml/predict.py (SwinV2 + CatBoost ensemble).
+# Install with:  pip install -r ml/requirements.txt
+torch>=2.2
+timm>=1.0
+catboost>=1.2
+opencv-python-headless>=4.9
+pydicom>=2.4
+numpy>=1.26

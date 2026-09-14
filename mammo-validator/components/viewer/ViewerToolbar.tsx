@@ -7,6 +7,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { useTranslation } from '@/lib/i18n/LanguageProvider';
 
 /** Neutral (100%) position for the brightness / contrast bars. */
 export const DISPLAY_NEUTRAL = 100;
@@ -91,11 +92,12 @@ export function ViewerToolbar({
   onZoomOut,
   onReset,
 }: ViewerToolbarProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-lg border border-slate-700/80 bg-slate-950/85 px-3 py-1.5 shadow-2xl backdrop-blur">
       <SliderBar
         icon={SunMedium}
-        label="Brightness"
+        label={t('viewer.brightness')}
         value={brightness}
         min={BRIGHTNESS_LIMITS.min}
         max={BRIGHTNESS_LIMITS.max}
@@ -106,7 +108,7 @@ export function ViewerToolbar({
 
       <SliderBar
         icon={Contrast}
-        label="Contrast"
+        label={t('viewer.contrast')}
         value={contrast}
         min={CONTRAST_LIMITS.min}
         max={CONTRAST_LIMITS.max}
@@ -118,7 +120,7 @@ export function ViewerToolbar({
       <div className="flex items-center gap-0.5">
         <button
           type="button"
-          title="Zoom out"
+          title={t('viewer.zoomOut')}
           onClick={onZoomOut}
           className="inline-flex size-7 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
         >
@@ -129,7 +131,7 @@ export function ViewerToolbar({
         </span>
         <button
           type="button"
-          title="Zoom in"
+          title={t('viewer.zoomIn')}
           onClick={onZoomIn}
           className="inline-flex size-7 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
         >
@@ -141,12 +143,12 @@ export function ViewerToolbar({
 
       <button
         type="button"
-        title="Reset brightness, contrast, zoom and pan"
+        title={t('viewer.resetHint')}
         onClick={onReset}
         className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
       >
         <RotateCcw className="size-3.5" />
-        Reset
+        {t('viewer.reset')}
       </button>
     </div>
   );

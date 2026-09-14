@@ -47,17 +47,26 @@ export function StageStatus({ phase }: { phase: ViewerPhase }) {
   return null;
 }
 
+/** Overlay text shown in the top-left corner of the image stage. */
+export interface StageAnnotationText {
+  badge: string;
+  title: string;
+  /** Optional second line, e.g. the renderer / source caption. */
+  subtitle?: string;
+}
+
 /** Watermark annotation in the top-left of the stage. */
-function StageAnnotation({ caseStudy }: { caseStudy: StudyCase }) {
+function StageAnnotation({ badge, title, subtitle }: StageAnnotationText) {
   return (
     <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-start gap-2">
       <div className="flex size-8 items-center justify-center rounded-lg bg-slate-950/70 font-mono text-base font-black text-sky-200 backdrop-blur">
-        {caseStudy.acquisition.laterality}
+        {badge}
       </div>
       <div className="rounded-lg bg-slate-950/70 px-2.5 py-1.5 text-[11px] leading-tight text-slate-300 backdrop-blur">
-        <div className="font-semibold">
-          {caseStudy.acquisition.view} view · {caseStudy.study.description}
-        </div>
+        <div className="font-semibold">{title}</div>
+        {subtitle ? (
+          <div className="font-mono text-[10px] text-slate-500">{subtitle}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -77,6 +86,8 @@ function StageMetadata({ formatCaption }: { formatCaption?: string }) {
 
 interface ImageViewerProps {
   caseStudy: StudyCase;
+  /** Optional overlay text; defaults to the study's laterality / view. */
+  annotation?: StageAnnotationText;
 }
 
 /**
@@ -86,7 +97,7 @@ interface ImageViewerProps {
  * The parent (Workbench) mounts one instance per image id (`key={imageId}`) so
  * every new study starts with a clean viewport, default display and full reset.
  */
-export function ImageViewer({ caseStudy }: ImageViewerProps) {
+export function ImageViewer({ caseStudy, annotation }: ImageViewerProps) {
   const [resetNonce, setResetNonce] = useState(0);
   const [brightness, setBrightness] = useState(DISPLAY_NEUTRAL);
   const [contrast, setContrast] = useState(DISPLAY_NEUTRAL);
@@ -130,7 +141,16 @@ export function ImageViewer({ caseStudy }: ImageViewerProps) {
         )}
       </div>
 
-      <StageAnnotation caseStudy={caseStudy} />
+      <StageAnnotation
+        {...(annotation ?? {
+          badge: caseStudy.acquisition.laterality,
+          title: `${caseStudy.acquisition.view} view · ${caseStudy.study.description}`,
+          subtitle:
+            caseStudy.image.type === 'dicom'
+              ? 'Native DICOM · Cornerstone3D'
+              : 'Web image · canvas',
+        })}
+      />
       <StageStatus phase={phase} />
       <StageMetadata formatCaption={formatCaption} />
 

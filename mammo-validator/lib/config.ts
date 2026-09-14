@@ -23,4 +23,5 @@ export const REVIEWER_STORAGE_KEY = 'mammoqa.reviewer';
 export const API_ENDPOINTS = {
   cases: '/api/cases',
   validation: '/api/validation',
+  predict: '/api/predict',
 } as const;

@@ -1,7 +1,9 @@
 'use client';
 
-import { Bot, Check, PenLine } from 'lucide-react';
+import Link from 'next/link';
+import { Bot, Check, PenLine, ScanSearch } from 'lucide-react';
 import { Kbd } from '@/components/ui/Button';
+import { useTranslation } from '@/lib/i18n/LanguageProvider';
 import { ToneBadge } from '@/components/ui/Badge';
 import {
   biradsDescriptor,
@@ -163,6 +165,7 @@ function DecisionSummary({
 }
 
 export function ValidationPanel() {
+  const { t } = useTranslation();
   const active = useWorkbenchStore(selectActiveCase);
   const decision = useWorkbenchStore((state) =>
     active ? selectDecisionFor(state, active.imageId) : undefined
@@ -174,6 +177,60 @@ export function ValidationPanel() {
   const approveActive = useWorkbenchStore((state) => state.approveActive);
 
   if (!active) return null;
+
+  // Dataset images can reach the worklist without any AI label. Rather than
+  // showing a meaningless assessment, hand the image to /predict.
+  if (active.needsPrediction) {
+    const predictHref =
+      `/predict?sample=${encodeURIComponent(active.image.url)}` +
+      `&imageId=${encodeURIComponent(active.imageId)}&from=review`;
+
+    return (
+      <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-slate-800 bg-slate-900/40 xl:w-96">
+        <div className="space-y-5 p-4">
+          <section>
+            <div className="mb-2 flex items-center gap-2">
+              <Bot className="size-4 text-slate-500" />
+              <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                AI assessment
+              </h2>
+            </div>
+            <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4">
+              <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300 ring-1 ring-inset ring-amber-400/30">
+                {t('panel.unlabeled')}
+              </span>
+              <p className="mt-2 text-sm font-semibold text-slate-200">
+                {t('panel.noLabelTitle')}
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                {t('panel.noLabelBody')}
+              </p>
+              <Link
+                href={predictHref}
+                className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-sky-500 text-sm font-semibold text-white shadow-lg shadow-sky-950/40 transition-colors hover:bg-sky-400"
+              >
+                <ScanSearch className="size-4" />
+                {t('panel.predictThisLabel')}
+              </Link>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Radiologist decision
+            </h2>
+            {decision ? (
+              <DecisionSummary record={decision} />
+            ) : (
+              <p className="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-center text-[11px] text-slate-600">
+                {t('panel.predictFirst')}
+              </p>
+            )}
+          </section>
+        </div>
+      </aside>
+    );
+  }
 
   const descriptor = biradsDescriptor(active.ai.biradsGrade);
   const predictedClass = active.ai.predictedClass;
@@ -397,7 +454,7 @@ export function ValidationPanel() {
               className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-600 bg-slate-800/60 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-500 hover:bg-slate-700/70"
             >
               <PenLine className="size-4" />
-              Relabel image
+              {t('panel.relabelImage')}
               <Kbd>R</Kbd>
             </button>
           </div>

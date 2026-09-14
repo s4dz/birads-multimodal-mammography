@@ -1,5 +1,6 @@
-import { Workbench } from '@/components/layout/Workbench';
+import { redirect } from 'next/navigation';
 
+/** Landing page: send the radiologist to the prediction workspace. */
 export default function HomePage() {
-  return <Workbench />;
+  redirect('/predict');
 }

@@ -11,12 +11,14 @@ import {
 } from 'lucide-react';
 import { useWorkbenchStore } from '@/store/workbench-store';
 import { usePatientGroups } from '@/hooks/usePatientGroups';
+import { useTranslation } from '@/lib/i18n/LanguageProvider';
+import type { TranslationKey } from '@/lib/i18n/dictionary';
 import type { PatientGroup } from '@/hooks/usePatientGroups';
 import type { StudyCase, SyncState, ValidationRecord } from '@/lib/types';
 
 type GroupReviewStatus = 'awaiting' | 'approved' | 'relabelled' | 'saving';
 
-type ListFilter = 'all' | 'awaiting' | 'approved' | 'relabelled';
+type ListFilter = 'all' | 'unlabeled' | 'awaiting' | 'approved' | 'relabelled';
 
 function groupStatus(
   group: PatientGroup,
@@ -46,14 +48,15 @@ const STATUS_STYLES: Record<GroupReviewStatus, string> = {
 };
 
 function StatusChip({ status }: { status: GroupReviewStatus }) {
+  const { t } = useTranslation();
   const label =
     status === 'awaiting'
-      ? 'Pending'
+      ? t('queue.statusPending')
       : status === 'approved'
-        ? 'Approved'
+        ? t('queue.statusApproved')
         : status === 'relabelled'
-          ? 'Relabeled'
-          : 'Saving…';
+          ? t('queue.statusRelabeled')
+          : t('queue.statusSaving');
   return (
     <span
       className={[
@@ -123,6 +126,7 @@ function ViewItem({
   sync: SyncState | undefined;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <li>
       <button
@@ -138,6 +142,14 @@ function ViewItem({
       >
         <div className="relative h-16 w-full overflow-hidden rounded-md bg-black">
           <Thumb c={c} />
+          {c.needsPrediction ? (
+            <span
+              title={t('queue.noLabelHint')}
+              className="absolute left-1 top-1 rounded bg-amber-400/95 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-amber-950"
+            >
+              {t('queue.noLabelBadge')}
+            </span>
+          ) : null}
           {record ? (
             <span className="absolute right-1 top-1 rounded bg-black/60 p-0.5">
               <DecisionIcon record={record} sync={sync} />
@@ -148,7 +160,11 @@ function ViewItem({
           <span
             className={[
               'font-mono text-[10px]',
-              isActive ? 'text-sky-300' : 'text-slate-500',
+              isActive
+                ? 'text-sky-300'
+                : c.needsPrediction
+                  ? 'text-amber-300'
+                  : 'text-slate-500',
             ].join(' ')}
           >
             {c.acquisition.laterality}-{c.acquisition.view}
@@ -177,6 +193,7 @@ function PatientGroupItem({
   syncByImageId: Record<string, SyncState>;
   goToIndex: (index: number) => void;
 }) {
+  const { t } = useTranslation();
   const isActiveGroup =
     activeIndex >= group.startIndex && activeIndex <= group.endIndex;
   const [isExpanded, setIsExpanded] = useState(isActiveGroup);
@@ -220,7 +237,7 @@ function PatientGroupItem({
           <div className="mt-1 flex items-center justify-between gap-2">
             <StatusChip status={status} />
             <span className="text-[10px] text-slate-600">
-              {group.cases.length} views
+              {t('queue.views', { count: group.cases.length })}
             </span>
           </div>
         </div>
@@ -250,6 +267,7 @@ function PatientGroupItem({
 
 /** Left-hand worklist: searchable + filterable patient groups with per-view previews. */
 export function QueueRail() {
+  const { t } = useTranslation();
   const cases = useWorkbenchStore((state) => state.cases);
   const activeIndex = useWorkbenchStore((state) => state.activeIndex);
   const recordByImageId = useWorkbenchStore((state) => state.recordByImageId);
@@ -277,41 +295,57 @@ export function QueueRail() {
     const matchesQuery =
       !needle || group.patient.id.toLowerCase().includes(needle);
     const matchesFilter =
-      filter === 'all' || groupStatuses[group.patientId] === filter;
+      filter === 'all'
+        ? true
+        : filter === 'unlabeled'
+          ? group.cases.some((c) => c.needsPrediction)
+          : groupStatuses[group.patientId] === filter;
     return matchesQuery && matchesFilter;
   });
 
-  const FILTERS: Array<{ key: ListFilter; label: string }> = [
-    { key: 'all', label: 'All' },
-    { key: 'awaiting', label: 'Pending' },
-    { key: 'approved', label: 'Approved' },
-    { key: 'relabelled', label: 'Relabeled' },
+  const unlabeledCount = useMemo(
+    () => cases.filter((c) => c.needsPrediction).length,
+    [cases],
+  );
+
+  const FILTERS: Array<{
+    key: ListFilter;
+    labelKey: TranslationKey;
+    count?: number;
+  }> = [
+    { key: 'all', labelKey: 'queue.filterAll' },
+    { key: 'unlabeled', labelKey: 'queue.filterNoLabel', count: unlabeledCount },
+    { key: 'awaiting', labelKey: 'queue.filterPending' },
+    { key: 'approved', labelKey: 'queue.filterApproved' },
+    { key: 'relabelled', labelKey: 'queue.filterRelabeled' },
   ];
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r border-slate-800 bg-slate-950/60">
       <div className="flex items-center justify-between gap-2 border-b border-slate-800/70 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-        <span>Patients · {patientGroups.length}</span>
+        <span>{t('queue.title', { count: patientGroups.length })}</span>
         <span className="font-mono text-[10px] normal-case text-slate-600">
-          {cases.length} views
+          {t('queue.views', { count: cases.length })}
         </span>
       </div>
 
       {/* Review-status filter */}
-      <div className="flex items-center gap-0.5 border-b border-slate-800/70 px-2 py-1.5">
-        {FILTERS.map(({ key, label }) => (
+      <div className="flex flex-wrap items-center gap-1 border-b border-slate-800/70 px-2 py-1.5">
+        {FILTERS.map(({ key, labelKey, count }) => (
           <button
             key={key}
             type="button"
             onClick={() => setFilter(key)}
             className={[
-              'flex-1 rounded-md px-2 py-1 text-[10px] font-semibold transition-colors',
+              'rounded-md px-2 py-1 text-[10px] font-semibold transition-colors',
               filter === key
-                ? 'bg-sky-500/15 text-sky-300'
+                ? key === 'unlabeled'
+                  ? 'bg-amber-500/15 text-amber-300'
+                  : 'bg-sky-500/15 text-sky-300'
                 : 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-300',
             ].join(' ')}
           >
-            {label}
+            {t(labelKey)}
           </button>
         ))}
       </div>
@@ -323,14 +357,14 @@ export function QueueRail() {
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Find patient ID…"
+            placeholder={t('queue.searchPlaceholder')}
             className="h-8 w-full rounded-md border border-slate-700/70 bg-slate-900/70 pl-7 pr-7 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-500/60 focus:outline-none"
           />
           {query ? (
             <button
               type="button"
               onClick={() => setQuery('')}
-              title="Clear search"
+              title={t('queue.clearSearch')}
               className="absolute right-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-slate-500 transition-colors hover:text-slate-200"
             >
               <X className="size-3.5" />
@@ -347,13 +381,9 @@ export function QueueRail() {
 
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         {cases.length === 0 ? (
-          <p className="px-1 text-xs text-slate-600">Empty worklist</p>
+          <p className="px-1 text-xs text-slate-600">{t('queue.empty')}</p>
         ) : visibleGroups.length === 0 ? (
-          <p className="px-1 text-xs text-slate-600">
-            {needle
-              ? 'No patient matches that ID.'
-              : 'No patients match this filter.'}
-          </p>
+          <p className="px-1 text-xs text-slate-600">{t('queue.noMatch')}</p>
         ) : (
           <>
             {visibleGroups.map((group) => (
