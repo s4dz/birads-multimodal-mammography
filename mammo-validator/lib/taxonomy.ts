@@ -1,4 +1,4 @@
-import type { BiRadsDescriptor, BiRadsGrade, Tone } from './types';
+import type { AiClassIndex, BiRadsDescriptor, BiRadsGrade, Tone } from './types';
 
 /**
  * ACR BI-RADS (5th/6th ed.) assessment categories used across the workbench.
@@ -83,6 +83,42 @@ export const SIMPLE_TAXONOMY = [
   { key: 'Benign', title: 'Benign', tone: 'low-risk' as Tone },
   { key: 'Malignant', title: 'Malignant', tone: 'critical' as Tone },
 ];
+
+/**
+ * The model's 3 coarse output classes and the BI-RADS span each covers.
+ * Displayed whenever model output is shown -- never a single synthetic grade.
+ */
+export const AI_CLASSES: Record<
+  AiClassIndex,
+  { name: string; range: string; tone: Tone; summary: string }
+> = {
+  0: {
+    name: 'Normal',
+    range: 'BI-RADS 1',
+    tone: 'positive',
+    summary: 'No suspicious findings',
+  },
+  1: {
+    name: 'Benign-leaning',
+    range: 'BI-RADS 2-3',
+    tone: 'watch',
+    summary: 'Probably benign — short-interval follow-up suggested',
+  },
+  2: {
+    name: 'Suspicious',
+    range: 'BI-RADS 4-5',
+    tone: 'critical',
+    summary: 'Suspicious abnormality — biopsy recommendation',
+  },
+};
+
+export function toneForClass(index: AiClassIndex): Tone {
+  return AI_CLASSES[index]?.tone ?? 'neutral';
+}
+
+export function classSummary(index: AiClassIndex): string {
+  return AI_CLASSES[index]?.summary ?? '';
+}
 
 export function biradsDescriptor(grade: BiRadsGrade): BiRadsDescriptor {
   const found = BY_GRADE.get(grade);

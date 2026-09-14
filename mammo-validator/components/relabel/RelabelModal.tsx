@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { ToneBadge } from '@/components/ui/Badge';
@@ -9,8 +9,8 @@ import {
   SIMPLE_TAXONOMY,
   TAXONOMY_MODE_LABELS,
   biradsAuditLabel,
-  biradsDescriptor,
   toneClasses,
+  toneForClass,
   toneForLabel,
   type LabelKind,
 } from '@/lib/taxonomy';
@@ -43,11 +43,6 @@ export function RelabelModal() {
   const [mode, setMode] = useState<LabelKind>('birads');
   const [selected, setSelected] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
-
-  const originalLabel = useMemo(
-    () => (active ? biradsAuditLabel(active.ai.biradsGrade) : ''),
-    [active]
-  );
 
   // Reset the form every time the dialog opens for a new review.
   useEffect(() => {
@@ -105,8 +100,8 @@ export function RelabelModal() {
         {/* Context: what the AI said */}
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2 text-xs">
           <span className="text-slate-500">AI suggestion</span>
-          <ToneBadge tone={biradsDescriptor(active.ai.biradsGrade).tone}>
-            {originalLabel}
+          <ToneBadge tone={toneForClass(active.ai.predictedClass.index)}>
+            {active.ai.predictedClass.name} ({active.ai.predictedClass.range})
           </ToneBadge>
           <span className="ml-auto text-slate-600">{reviewerId}</span>
         </div>

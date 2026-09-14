@@ -3,7 +3,8 @@
 A radiologist-facing web application for validating AI predictions on **digital
 mammography**. Reviewers read each mammogram in a dark high-contrast viewer
 (both standard web images **and native DICOM**), compare it with the model's
-BI-RADS label, then **approve** or **relabel** with optional notes. Every
+3-class prediction (Normal / Benign-leaning / Suspicious, shown with the BI-RADS span
+it covers), then **approve** or **relabel** with optional notes. Every
 decision is emitted in a structured validation payload and posted to the API.
 
 Built with **Next.js (App Router) + React 19 + TypeScript + Tailwind CSS v4 +
@@ -19,7 +20,7 @@ Zustand**, and **Cornerstone3D v5** for native DICOM rendering.
 | DICOM | Native in-browser decoding via Cornerstone3D (`@cornerstonejs/dicom-image-loader`, wadouri `dicomfile:` scheme) — no server-side image conversion |
 | PNG/JPG | Canvas renderer with the same gestures and a live zoom readout |
 | Header | Patient ID, age/sex, study date, accession, **view (MLO/CC) + side (L/R)**, image type chip |
-| Validation panel | AI assessment (hero BI-RADS tone chip + description, confidence meter, de-emphasized alternative probability bars), AI findings list, radiologist decision state (**Currently approved** / Relabeled), **Approve BI-RADS X** / **Update decision** and **Relabel** actions |
+| Validation panel | AI assessment (hero 3-class chip e.g. **Suspicious (BI-RADS 4-5)** + one-line summary, confidence meter, alternative class-probability bars), AI findings list with **structured label-disagreement** (original VinDr grade vs model prediction), radiologist decision state (**Currently approved** / Relabeled), **Approve BI-RADS X** / **Update decision** and **Relabel** actions |
 | Relabel dialog | BI-RADS **0–6 (4A/4B/4C)** grid **or** 3-class triage (Normal / Benign / Malignant) + free-text notes (500 chars) |
 | Queue | Thumbnail worklist with per-case decision markers (approved ✓ / relabelled flag / sync spinner) |
 | Shortcuts | `A` approve · `R` relabel · `←`/`→` navigate · `Home`/`End` jump · `Esc` close dialog |
@@ -128,8 +129,10 @@ npm start       # serve on http://localhost:3000
       "image": { "type": "dicom", "url": "/samples/dicom/mg-2404_MLO_R.dcm", "width": 1024, "height": 1400, "bitsAllocated": 16 },
       "ai": {
         "biradsGrade": "4C",
+        "predictedClass": { "index": 2, "name": "Suspicious", "range": "BI-RADS 4-5" },
         "confidence": 0.89,
         "gradeProbabilities": { "0": 0, "4C": 0.89, "…": 0 },
+        "classProbabilities": { "normal": 0.05, "benignLeaning": 0.06, "suspicious": 0.89 },
         "findings": [ { "id": "f-2404-1", "kind": "mass", "description": "Spiculated mass, 14 mm, high density", "location": "upper outer quadrant", "probability": 0.84 } ],
         "model": "MammoNet-V2 (VinDr-Mammo fine-tune)",
         "modelVersion": "v2.3.1",
@@ -139,6 +142,16 @@ npm start       # serve on http://localhost:3000
   ]
 }
 ```
+
+**AI output representation.** The model is trained on 3 coarse classes, so the UI
+always shows the class plus the BI-RADS span it covers: `Normal → BI-RADS 1`,
+`Benign-leaning → BI-RADS 2-3`, `Suspicious → BI-RADS 4-5`. Those live in
+`ai.predictedClass` and `ai.classProbabilities`; `biradsGrade` / `gradeProbabilities`
+are kept for API compatibility. Flag label-disagreement findings additionally carry
+`originalClass` (with `grade` = the exact VinDr `breast_birads` value) and
+`modelClass`. Decision payloads (`POST /api/validation`) and
+`record.originalLabel` / `finalLabel` remain BI-RADS-grade strings — the relabel
+picker and approve action are unchanged.
 
 ### `POST /api/validation`
 
@@ -216,6 +229,7 @@ lib/
 public/samples/png … dicom …                  # generated demo exams
 run.ps1 · run.bat                              # Windows one-command launchers
 scripts/generate_sample_data.py               # phantom generator (NumPy/Pillow/pydicom)
+scripts/import_research_flags.py              # rebuild mock-data.ts from CL research CSVs + VinDr
 ```
 
 ## Regenerating the demo images
@@ -235,6 +249,19 @@ written as **real DICOM P10 files** (Explicit VR Little Endian, MONOCHROME2,
 `lib/mock-data.ts` labels/descriptions intentionally match the phantom content,
 so approve-vs-relabel is a meaningful exercise (e.g. `mg-2404` really contains
 a spiculated mass with pleomorphic calcifications).
+
+### Rebuilding the CL research worklist
+
+```bash
+python scripts/import_research_flags.py
+```
+
+Rebuilds `lib/mock-data.ts` from `research_flagged_cases.csv`,
+`oof_predictions.csv`, and `vindr_detection_v1_folds.csv` (all expected in
+`mammo-validator/`). Every flagged patient gets all their views; flagged images
+carry a structured label-disagreement finding (`originalClass` with the exact
+VinDr `breast_birads` grade, `modelClass`, `originalConfidence`), and every case
+gets `predictedClass` + `classProbabilities` from the OOF output.
 
 ## Production considerations / current demo limits
 

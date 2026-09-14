@@ -38,6 +38,24 @@ export type Tone =
   | 'suspicious'
   | 'critical';
 
+/** Index of the model's coarse 3-class severity output. */
+export type AiClassIndex = 0 | 1 | 2;
+
+/**
+ * The model is trained on 3 coarse classes (Normal / Benign-leaning /
+ * Suspicious), not on raw BI-RADS. `name` is the class and `range` the
+ * BI-RADS span that class covers. `grade` optionally carries the exact
+ * ground-truth VinDr grade (from `breast_birads`).
+ */
+export interface AiClassLabel {
+  index: AiClassIndex;
+  name: string;
+  /** e.g. "BI-RADS 2-3". */
+  range: string;
+  /** Ground-truth VinDr grade when known, e.g. "BI-RADS 2". */
+  grade?: string;
+}
+
 export interface BiRadsDescriptor {
   /** Canonical code, e.g. "4C". */
   grade: BiRadsGrade;
@@ -63,6 +81,12 @@ export interface AiFinding {
   location: string;
   /** Model probability estimate for the finding, 0..1. */
   probability: number;
+
+  /* --- Structured class fields (present on flagged disagreements) --- */
+  originalClass?: AiClassLabel;
+  modelClass?: AiClassLabel;
+  /** Model self-confidence in the original label, 0..1 (flagged findings only). */
+  originalConfidence?: number;
 }
 
 export interface CaseImage {
@@ -91,10 +115,18 @@ export interface StudyInfo {
 
 export interface AiPrediction {
   biradsGrade: BiRadsGrade;
+  /** The model's coarse 3-class output (what the model actually emits). */
+  predictedClass: AiClassLabel;
   /** Overall model confidence 0..1. */
   confidence: number;
   /** Probability mass over the supported BI-RADS grades, for display. */
   gradeProbabilities: Record<BiRadsGrade, number>;
+  /** Real 3-class probabilities from the model OOF output. */
+  classProbabilities: {
+    normal: number;
+    benignLeaning: number;
+    suspicious: number;
+  };
   findings: AiFinding[];
   model: string;
   modelVersion: string;

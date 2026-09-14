@@ -3,13 +3,18 @@
 import { Bot, Check, PenLine } from 'lucide-react';
 import { Kbd } from '@/components/ui/Button';
 import { ToneBadge } from '@/components/ui/Badge';
-import { biradsAuditLabel, biradsDescriptor, toneForLabel } from '@/lib/taxonomy';
+import {
+  biradsDescriptor,
+  classSummary,
+  toneForClass,
+  toneForLabel,
+} from '@/lib/taxonomy';
 import {
   selectActiveCase,
   selectDecisionFor,
   useWorkbenchStore,
 } from '@/store/workbench-store';
-import type { BiRadsGrade, ValidationRecord } from '@/lib/types';
+import type { AiClassLabel, ValidationRecord } from '@/lib/types';
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-GB', {
@@ -20,47 +25,6 @@ function formatTime(iso: string): string {
 
 function prettyLabel(label: string): string {
   return label.replace(' — ', ' · ');
-}
-
-type Disagreement = {
-  originalGrade: string;
-  modelGrade: string;
-  confidence: number | null;
-  originalConfidence: number | null;
-};
-
-function parseDisagreement(description: string): Disagreement | null {
-  const original = description.match(
-    /Original label is [^(]* \(BI-RADS (\d[A-C]?)\)/i
-  );
-  const model = description.match(
-    /our model predicts [^(]* \(BI-RADS (\d[A-C]?)\)/i
-  );
-  if (!original || !model) return null;
-  const confidence = description.match(/with ([\d.]+)% confidence/i);
-  const originalConfidence = description.match(
-    /Model self-confidence in original label: ([\d.]+)%/i
-  );
-  return {
-    originalGrade: original[1].toUpperCase(),
-    modelGrade: model[1].toUpperCase(),
-    confidence: confidence ? Number(confidence[1]) : null,
-    originalConfidence: originalConfidence
-      ? Number(originalConfidence[1])
-      : null,
-  };
-}
-
-function gradeFromAuditLabel(label: string): BiRadsGrade | null {
-  const match = label.match(/BI-RADS\s*(\d[A-C]?)/i);
-  if (!match) return null;
-  const grade = match[1].toUpperCase() as BiRadsGrade;
-  try {
-    biradsDescriptor(grade);
-  } catch {
-    return null;
-  }
-  return grade;
 }
 
 function ConfidenceMeter({ value }: { value: number }) {
@@ -81,31 +45,37 @@ function ConfidenceMeter({ value }: { value: number }) {
   );
 }
 
-function TopCandidates({
+function ClassCandidates({
   probabilities,
 }: {
-  probabilities: Record<BiRadsGrade, number>;
+  probabilities: { normal: number; benignLeaning: number; suspicious: number };
 }) {
-  const top = Object.entries(probabilities)
-    .filter(([, value]) => value >= 0.02)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3);
-  const max = top[0]?.[1] ?? 1;
+  const rows = [
+    { index: 0 as const, label: 'Normal', range: 'BI-RADS 1', value: probabilities.normal },
+    { index: 1 as const, label: 'Benign-leaning', range: 'BI-RADS 2-3', value: probabilities.benignLeaning },
+    { index: 2 as const, label: 'Suspicious', range: 'BI-RADS 4-5', value: probabilities.suspicious },
+  ].sort((a, b) => b.value - a.value);
+  const max = rows[0]?.value ?? 1;
   return (
     <ul className="space-y-1">
-      {top.map(([grade, value]) => (
-        <li key={grade} className="flex items-center gap-2 text-[10px]">
-          <span className="w-14 shrink-0 font-mono text-slate-600">
-            {biradsDescriptor(grade as BiRadsGrade).label}
+      {rows.map((row) => (
+        <li key={row.index} className="flex items-center gap-2 text-[10px]">
+          <span className="min-w-0 truncate font-mono text-slate-400">
+            {row.label} <span className="text-slate-600">({row.range})</span>
           </span>
           <span className="h-1 flex-1 overflow-hidden rounded-full bg-slate-950 ring-1 ring-inset ring-white/5">
             <span
-              className="block h-full rounded-full bg-white/15"
-              style={{ width: `${Math.max(2, (value / max) * 100)}%` }}
+              className={[
+                'block h-full rounded-full',
+                row.value === max
+                  ? 'bg-sky-500/70'
+                  : 'bg-white/15',
+              ].join(' ')}
+              style={{ width: `${Math.max(2, (row.value / max) * 100)}%` }}
             />
           </span>
-          <span className="w-9 shrink-0 text-right font-mono text-slate-600">
-            {Math.round(value * 100)}%
+          <span className="w-9 shrink-0 text-right font-mono text-slate-500">
+            {Math.round(row.value * 100)}%
           </span>
         </li>
       ))}
@@ -113,15 +83,15 @@ function TopCandidates({
   );
 }
 
-function DecisionSummary({ record }: { record: ValidationRecord }) {
+function DecisionSummary({
+  record,
+  prediction = null,
+}: {
+  record: ValidationRecord;
+  prediction?: AiClassLabel | null;
+}) {
   const tone = toneForLabel(record.finalLabel);
   const isApproved = record.status === 'APPROVED';
-  const originalGrade = isApproved
-    ? null
-    : gradeFromAuditLabel(record.originalLabel);
-  const originalDescriptor = originalGrade
-    ? biradsDescriptor(originalGrade)
-    : null;
   return (
     <div
       className={[
@@ -160,16 +130,16 @@ function DecisionSummary({ record }: { record: ValidationRecord }) {
             AI originally predicted
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            {originalDescriptor ? (
+            {prediction ? (
               <>
                 <ToneBadge
-                  tone={originalDescriptor.tone}
+                  tone={toneForClass(prediction.index)}
                   className="px-2 py-0.5 text-xs"
                 >
-                  {originalDescriptor.label}
+                  {prediction.name}
                 </ToneBadge>
                 <span className="min-w-0 text-[11px] text-slate-400">
-                  {originalDescriptor.title}
+                  {prediction.range}
                 </span>
               </>
             ) : (
@@ -206,6 +176,7 @@ export function ValidationPanel() {
   if (!active) return null;
 
   const descriptor = biradsDescriptor(active.ai.biradsGrade);
+  const predictedClass = active.ai.predictedClass;
   const approved = decision?.status === 'APPROVED';
   const aiPct = Math.round(active.ai.confidence * 100);
 
@@ -222,24 +193,27 @@ export function ValidationPanel() {
           </div>
           <div className="rounded-xl border border-slate-700/70 bg-slate-900/80 p-3.5">
             <div className="flex items-start justify-between gap-2">
-              <ToneBadge tone={descriptor.tone} className="px-3.5 py-1.5 text-2xl">
-                {descriptor.label}
+              <ToneBadge
+                tone={toneForClass(predictedClass.index)}
+                className="px-3.5 py-1.5 text-2xl"
+              >
+                {predictedClass.name}
               </ToneBadge>
             </div>
             <p className="mt-1.5 text-[13px] font-medium text-slate-200">
-              {descriptor.title}
+              {predictedClass.range}
             </p>
             <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-              {descriptor.description}
+              {classSummary(predictedClass.index)}
             </p>
 
             <div className="mt-3 space-y-2.5">
               <ConfidenceMeter value={active.ai.confidence} />
               <div>
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  Alternative BI-RADS probabilities
+                  Alternative class probabilities
                 </p>
-                <TopCandidates probabilities={active.ai.gradeProbabilities} />
+                <ClassCandidates probabilities={active.ai.classProbabilities} />
               </div>
             </div>
 
@@ -267,7 +241,9 @@ export function ValidationPanel() {
           ) : (
             <ul className="space-y-1.5">
               {active.ai.findings.map((finding) => {
-                const disagreement = parseDisagreement(finding.description);
+                const origin = finding.originalClass;
+                const model = finding.modelClass;
+                const disagreement = Boolean(origin && model);
                 return (
                   <li
                     key={finding.id}
@@ -288,42 +264,51 @@ export function ValidationPanel() {
                         <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300/80">
                           Label disagreement detected
                         </p>
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-[10px] text-slate-500">
+                        <div>
+                          <p className="text-[10px] text-slate-500">
                             Original label
-                          </span>
-                          <span className="font-mono text-[11px] text-slate-300">
-                            BI-RADS {disagreement.originalGrade}
-                          </span>
+                          </p>
+                          <p className="text-[11px] font-medium text-slate-200">
+                            {origin!.name}{' '}
+                            <span className="text-slate-400">
+                              ({origin!.range})
+                            </span>
+                            {origin!.grade ? (
+                              <span className="ml-1 font-mono text-[10px] text-slate-500">
+                                · VinDr: {origin!.grade}
+                              </span>
+                            ) : null}
+                          </p>
                         </div>
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-[10px] text-slate-500">
+                        <div>
+                          <p className="text-[10px] text-slate-500">
                             Model prediction
-                          </span>
-                          <span className="font-mono text-[11px] text-slate-100">
-                            BI-RADS {disagreement.modelGrade}
-                          </span>
+                          </p>
+                          <p className="text-[11px] font-medium text-slate-100">
+                            {model!.name}{' '}
+                            <span className="text-slate-400">
+                              ({model!.range})
+                            </span>
+                          </p>
                         </div>
                         <div className="flex items-baseline justify-between gap-2">
                           <span className="text-[10px] text-slate-500">
                             Model confidence
                           </span>
                           <span className="font-mono text-[11px] text-slate-300">
-                            {disagreement.confidence === null
-                              ? '—'
-                              : `${disagreement.confidence}%`}
+                            {Math.round(finding.probability * 100)}%
                           </span>
                         </div>
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-[10px] text-slate-600">
-                            Original-label confidence
-                          </span>
-                          <span className="font-mono text-[11px] text-slate-600">
-                            {disagreement.originalConfidence === null
-                              ? '—'
-                              : `${disagreement.originalConfidence}%`}
-                          </span>
-                        </div>
+                        {typeof finding.originalConfidence === 'number' ? (
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="text-[10px] text-slate-600">
+                              Original-label confidence
+                            </span>
+                            <span className="font-mono text-[11px] text-slate-600">
+                              {Math.round(finding.originalConfidence * 100)}%
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
                     ) : (
                       <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
@@ -349,11 +334,14 @@ export function ValidationPanel() {
               AI suggestion
             </p>
             <div className="mt-1 flex items-baseline gap-2">
-              <ToneBadge tone={descriptor.tone} className="px-2 py-0.5 text-xs">
-                {descriptor.label}
+              <ToneBadge
+                tone={toneForClass(predictedClass.index)}
+                className="px-2 py-0.5 text-xs"
+              >
+                {predictedClass.name}
               </ToneBadge>
               <span className="min-w-0 truncate text-[11px] text-slate-400">
-                {descriptor.title}
+                {predictedClass.range}
               </span>
               <span className="ml-auto shrink-0 font-mono text-[10px] text-slate-600">
                 {aiPct}% confidence
@@ -365,7 +353,7 @@ export function ValidationPanel() {
 
           {/* Your decision */}
           {decision ? (
-            <DecisionSummary record={decision} />
+            <DecisionSummary record={decision} prediction={predictedClass} />
           ) : (
             <div className="rounded-lg border border-dashed border-slate-700/60 bg-slate-900/50 px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
