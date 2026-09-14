@@ -117,6 +117,13 @@ export interface StudyCase {
   acquisition: AcquisitionInfo;
   image: CaseImage;
   ai: AiPrediction;
+  /**
+   * True when this image has **no AI label yet** (for example a dataset image
+   * that has never been scored). The workbench then offers a *Predict label*
+   * action instead of an assessment, and `ai.biradsGrade` is the BI-RADS 0
+   * placeholder ("incomplete — needs additional evaluation").
+   */
+  needsPrediction?: boolean;
 }
 
 /** The exact payload the client POSTs and the server persists. */
@@ -143,5 +150,64 @@ export interface ValidationApiResponse {
   ok: boolean;
   record: ValidationRecord;
   persistedCount: number;
+  message?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Prediction (Mode 1 — label a PNG / DICOM)                          */
+/* ------------------------------------------------------------------ */
+
+export type DensityChoice = 'A' | 'B' | 'C' | 'D';
+
+export interface PredictProbabilities {
+  normal: number;
+  benignLeaning: number;
+  suspicious: number;
+}
+
+export interface PredictFoldResult {
+  fold: number;
+  label: number;
+  probabilities: number[];
+}
+
+export interface PredictInput {
+  file: string;
+  age: number;
+  densityCode: number;
+}
+
+/** Response of ``POST /api/predict`` (produced by ``ml/predict.py``). */
+export interface PredictResponse {
+  ok: boolean;
+  label: number;
+  labelName: string;
+  /** Collapsed BI-RADS range, e.g. "BI-RADS 4-5". */
+  biradsRange: string;
+  confidence: number;
+  probabilities: PredictProbabilities;
+  folds: PredictFoldResult[];
+  model: string;
+  modelVersion: string;
+  input: PredictInput;
+  elapsedMs: number;
+}
+
+/** Ensemble health reported by ``GET /api/predict``. */
+export interface PredictWorkerInfo {
+  modelsDir: string;
+  folds: number[];
+  loaded: number;
+  loadErrors: string[];
+  missingKeys: number[];
+  unexpectedKeys: number[];
+  selectedFeatures: number[];
+}
+
+export interface PredictHealthResponse {
+  ok: boolean;
+  service?: string;
+  worker?: PredictWorkerInfo;
+  samples?: string[];
   message?: string;
 }

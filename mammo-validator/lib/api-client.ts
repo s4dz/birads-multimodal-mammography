@@ -1,5 +1,8 @@
 import { API_ENDPOINTS } from './config';
 import type {
+  DensityChoice,
+  PredictHealthResponse,
+  PredictResponse,
   StudyCase,
   ValidationApiResponse,
   ValidationRecord,
@@ -51,4 +54,61 @@ export async function submitValidation(
     body: JSON.stringify(record),
   });
   return readJson<ValidationApiResponse>(response);
+}
+
+/** GET /api/validation -> every decision recorded in this server session. */
+export async function fetchValidationRecords(): Promise<ValidationRecord[]> {
+  const response = await fetch(API_ENDPOINTS.validation, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  const payload = await readJson<{
+    records: ValidationRecord[];
+    count: number;
+  }>(response);
+  return payload.records;
+}
+
+/* ------------------------------------------------------------------ */
+/* Prediction (Mode 1)                                                 */
+/* ------------------------------------------------------------------ */
+
+/** GET /api/predict -> ensemble health + a short list of bundled samples. */
+export async function fetchPredictHealth(): Promise<PredictHealthResponse> {
+  const response = await fetch(API_ENDPOINTS.predict, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  return readJson<PredictHealthResponse>(response);
+}
+
+/** Score a bundled sample image (must live under public/samples). */
+export async function predictSample(
+  samplePath: string,
+  age: number,
+  density: DensityChoice
+): Promise<PredictResponse> {
+  const response = await fetch(API_ENDPOINTS.predict, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ samplePath, age, density }),
+  });
+  return readJson<PredictResponse>(response);
+}
+
+/** Score an uploaded PNG/JPG or DICOM file. */
+export async function predictUpload(
+  file: File,
+  age: number,
+  density: DensityChoice
+): Promise<PredictResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('age', String(age));
+  form.append('density', density);
+  const response = await fetch(API_ENDPOINTS.predict, {
+    method: 'POST',
+    body: form,
+  });
+  return readJson<PredictResponse>(response);
 }

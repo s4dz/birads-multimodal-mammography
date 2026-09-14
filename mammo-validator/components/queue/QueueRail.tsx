@@ -16,7 +16,7 @@ import type { StudyCase, SyncState, ValidationRecord } from '@/lib/types';
 
 type GroupReviewStatus = 'awaiting' | 'approved' | 'relabelled' | 'saving';
 
-type ListFilter = 'all' | 'awaiting' | 'approved' | 'relabelled';
+type ListFilter = 'all' | 'unlabeled' | 'awaiting' | 'approved' | 'relabelled';
 
 function groupStatus(
   group: PatientGroup,
@@ -138,6 +138,14 @@ function ViewItem({
       >
         <div className="relative h-16 w-full overflow-hidden rounded-md bg-black">
           <Thumb c={c} />
+          {c.needsPrediction ? (
+            <span
+              title="No AI label yet — open it and predict the label"
+              className="absolute left-1 top-1 rounded bg-amber-400/95 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-amber-950"
+            >
+              no label
+            </span>
+          ) : null}
           {record ? (
             <span className="absolute right-1 top-1 rounded bg-black/60 p-0.5">
               <DecisionIcon record={record} sync={sync} />
@@ -148,7 +156,11 @@ function ViewItem({
           <span
             className={[
               'font-mono text-[10px]',
-              isActive ? 'text-sky-300' : 'text-slate-500',
+              isActive
+                ? 'text-sky-300'
+                : c.needsPrediction
+                  ? 'text-amber-300'
+                  : 'text-slate-500',
             ].join(' ')}
           >
             {c.acquisition.laterality}-{c.acquisition.view}
@@ -277,12 +289,22 @@ export function QueueRail() {
     const matchesQuery =
       !needle || group.patient.id.toLowerCase().includes(needle);
     const matchesFilter =
-      filter === 'all' || groupStatuses[group.patientId] === filter;
+      filter === 'all'
+        ? true
+        : filter === 'unlabeled'
+          ? group.cases.some((c) => c.needsPrediction)
+          : groupStatuses[group.patientId] === filter;
     return matchesQuery && matchesFilter;
   });
 
-  const FILTERS: Array<{ key: ListFilter; label: string }> = [
+  const unlabeledCount = useMemo(
+    () => cases.filter((c) => c.needsPrediction).length,
+    [cases],
+  );
+
+  const FILTERS: Array<{ key: ListFilter; label: string; count?: number }> = [
     { key: 'all', label: 'All' },
+    { key: 'unlabeled', label: 'No label', count: unlabeledCount },
     { key: 'awaiting', label: 'Pending' },
     { key: 'approved', label: 'Approved' },
     { key: 'relabelled', label: 'Relabeled' },
@@ -298,20 +320,23 @@ export function QueueRail() {
       </div>
 
       {/* Review-status filter */}
-      <div className="flex items-center gap-0.5 border-b border-slate-800/70 px-2 py-1.5">
-        {FILTERS.map(({ key, label }) => (
+      <div className="flex flex-wrap items-center gap-1 border-b border-slate-800/70 px-2 py-1.5">
+        {FILTERS.map(({ key, label, count }) => (
           <button
             key={key}
             type="button"
             onClick={() => setFilter(key)}
             className={[
-              'flex-1 rounded-md px-2 py-1 text-[10px] font-semibold transition-colors',
+              'rounded-md px-2 py-1 text-[10px] font-semibold transition-colors',
               filter === key
-                ? 'bg-sky-500/15 text-sky-300'
+                ? key === 'unlabeled'
+                  ? 'bg-amber-500/15 text-amber-300'
+                  : 'bg-sky-500/15 text-sky-300'
                 : 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-300',
             ].join(' ')}
           >
             {label}
+            {count ? ` · ${count}` : ''}
           </button>
         ))}
       </div>

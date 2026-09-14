@@ -11,6 +11,18 @@ Zustand**, and **Cornerstone3D v5** for native DICOM rendering.
 
 ---
 
+## Two modes
+
+| Mode | Purpose |
+| --- | --- |
+| **Predict** | Drop a single PNG/JPG or DICOM mammogram (or pick a bundled sample), enter the patient's age and breast density, and get the model's BI-RADS assessment with class probabilities and a per-fold breakdown. |
+| **Review dataset** | The radiologist worklist: browse patients and their views, then **approve** or **relabel** each AI prediction; decisions are POSTed to `/api/validation`. |
+
+Switch modes with the tabs in the top bar. Predict mode runs the real 4-fold
+ensemble through `POST /api/predict` — see [Model & prediction](#model--prediction-mode-1).
+
+---
+
 ## Features
 
 | Area | What you get |
@@ -23,7 +35,7 @@ Zustand**, and **Cornerstone3D v5** for native DICOM rendering.
 | Relabel dialog | BI-RADS **0–6 (4A/4B/4C)** grid **or** 3-class triage (Normal / Benign / Malignant) + free-text notes (500 chars) |
 | Queue | Thumbnail worklist with per-case decision markers (approved ✓ / relabelled flag / sync spinner) |
 | Shortcuts | `A` approve · `R` relabel · `←`/`→` navigate · `Home`/`End` jump · `Esc` close dialog |
-| API | `GET /api/cases` (worklist + AI payload), `POST /api/validation` (decision), `GET /api/validation` (session log) |
+| API | `GET /api/cases` (worklist + AI payload), `POST /api/validation` (decision), `GET /api/validation` (session log), `GET\|POST /api/predict` (ensemble health + label prediction) |
 
 ## Tech stack
 
@@ -202,6 +214,66 @@ components/
   viewer/ImageViewer.tsx                      # routes PNG vs DICOM, hosts toolbar
   viewer/PngImageViewer.tsx                   # canvas renderer (zoom/pan/brightness)
   viewer/DicomViewer.tsx                      # Cornerstone3D stack viewport
+
+## Model & prediction (Mode 1)
+
+Predict mode runs the **actual trained model** — no mock predictions.
+
+**Architecture** (ported 1:1 from `bestone_v3_cv_oof.ipynb` into `ml/model.py`):
+
+- `SwinV2-Tiny` (`swinv2_tiny_window16_256` via timm, `features_only`) image backbone at 1024×1024
+- FT-Transformer style embedding of the tabular inputs (breast density + age)
+- Cross-attention fusion — tabular tokens query the image tokens → 256-d latent vector
+- A `CatBoost` head per fold, trained on a **selected subset** of that latent vector
+
+**Preprocessing** (`MammographyTransform`): grayscale → resize 1024×1024 (INTER_CUBIC)
+→ median blur (kernel 3) → CLAHE (clip 2.0, 8×8 tiles) → scale to [0, 1] →
+z-score (mean `0.2865`, std `0.1743`). DICOM is converted to 8-bit first using
+the stored Window Center/Width (falling back to a 1–99 percentile stretch) and
+MONOCHROME1 is inverted.
+
+**Checkpoints** live in `../models/` (sibling of `mammo-validator/`):
+
+| File | Contents |
+| --- | --- |
+| `fold_{0..3}_pytorch.pth` | `model_state_dict`, `selected_feature_indices`, `embed_dim`, `num_classes`, `seed` |
+| `fold_{0..3}_catboost.cbm` | CatBoost head for that fold |
+
+The reported label is the **mean of the four folds**; fold disagreement is
+expected near decision boundaries.
+
+### Running inference
+
+```bash
+pip install -r ml/requirements.txt     # torch, timm, catboost, opencv, pydicom
+python ml/predict.py --describe        # fold / checkpoint health check
+python ml/predict.py mammo.png --age 55 --density C
+python ml/predict.py mammo.dcm --age 62 --density B
+python ml/predict.py --serve           # JSON-line worker used by /api/predict
+```
+
+`/api/predict` spawns the worker once and keeps it warm (loading the four folds
+costs ~10 s; inference adds ~10 s on CPU). Useful overrides:
+
+| Env var | Meaning |
+| --- | --- |
+| `MAMMO_PYTHON` | Python interpreter to launch (default `python` / `python3`) |
+| `MAMMO_MODELS_DIR` | Location of the fold checkpoints (default `../models`) |
+
+### Output contract
+
+The model was trained on a **3-class collapse**, so the UI reports BI-RADS
+ranges rather than inventing sub-grades:
+
+| Class | Reported as |
+| --- | --- |
+| 0 | Normal — BI-RADS 1 |
+| 1 | Benign-leaning — BI-RADS 2-3 |
+| 2 | Suspicious — BI-RADS 4-5 |
+
+> ⚠️ **Research prototype.** Trained on VinDr-Mammo and not clinically
+> validated. Treat every prediction as a research artefact.
+
   viewer/ViewerToolbar.tsx                    # Brightness/Contrast bars + Zoom + Reset
   panel/ValidationPanel.tsx                   # AI label card, findings, actions
   relabel/RelabelModal.tsx                    # BI-RADS / 3-class picker + notes

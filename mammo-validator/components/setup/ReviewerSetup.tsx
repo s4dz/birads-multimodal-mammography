@@ -65,7 +65,7 @@ export function ReviewerSetup() {
   };
 
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-6 bg-slate-950 p-6 text-slate-200 antialiased">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 bg-slate-950 p-6 text-slate-200 antialiased">
       <div className="flex items-center gap-3">
         <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 shadow">
           <ScanLine className="size-5 text-white" />

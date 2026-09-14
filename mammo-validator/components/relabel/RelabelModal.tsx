@@ -44,10 +44,12 @@ export function RelabelModal() {
   const [selected, setSelected] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
 
-  const originalLabel = useMemo(
-    () => (active ? biradsAuditLabel(active.ai.biradsGrade) : ''),
-    [active]
-  );
+  const originalLabel = useMemo(() => {
+    if (!active) return '';
+    return active.needsPrediction
+      ? 'No AI label yet'
+      : biradsAuditLabel(active.ai.biradsGrade);
+  }, [active]);
 
   // Reset the form every time the dialog opens for a new review.
   useEffect(() => {
@@ -105,7 +107,13 @@ export function RelabelModal() {
         {/* Context: what the AI said */}
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2 text-xs">
           <span className="text-slate-500">AI suggestion</span>
-          <ToneBadge tone={biradsDescriptor(active.ai.biradsGrade).tone}>
+          <ToneBadge
+            tone={
+              active.needsPrediction
+                ? 'neutral'
+                : biradsDescriptor(active.ai.biradsGrade).tone
+            }
+          >
             {originalLabel}
           </ToneBadge>
           <span className="ml-auto text-slate-600">{reviewerId}</span>
