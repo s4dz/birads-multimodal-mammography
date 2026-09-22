@@ -413,7 +413,7 @@ export function PredictWorkbench() {
 
   const searchParams = useSearchParams();
   const reviewer = useWorkbenchStore((state) => state.reviewer);
-  const restoreReviewer = useWorkbenchStore((state) => state.restoreReviewer);
+  const refreshSession = useWorkbenchStore((state) => state.refreshSession);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -452,7 +452,7 @@ export function PredictWorkbench() {
   useEffect(() => {
     if (initialisedRef.current) return;
     initialisedRef.current = true;
-    restoreReviewer();
+    void refreshSession();
     const sample = searchParams.get('sample');
     if (!sample) return;
     setSource({ kind: 'sample', path: sample });
@@ -460,7 +460,7 @@ export function PredictWorkbench() {
       searchParams.get('imageId') ?? sample.split('/').pop() ?? null
     );
     setCameFromReview(searchParams.get('from') === 'review');
-  }, [restoreReviewer, searchParams]);
+  }, [refreshSession, searchParams]);
 
   /* A new image or prediction invalidates any previous sign-off. */
   useEffect(() => {

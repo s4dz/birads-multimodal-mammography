@@ -1,9 +1,5 @@
 /**
  * Static application configuration.
- *
- * In a production deployment the radiologist identity would come from the
- * session / SSO token; here it is a fixed demo reviewer so the validation
- * payload schema stays complete.
  */
 
 export const APP_CONFIG = {
@@ -18,10 +14,18 @@ export type ReviewerProfile = {
   specialty: string;
 };
 
-export const REVIEWER_STORAGE_KEY = 'mammoqa.reviewer';
-
 export const API_ENDPOINTS = {
   cases: '/api/cases',
   validation: '/api/validation',
   predict: '/api/predict',
+  login: '/api/auth/login',
+  logout: '/api/auth/logout',
+  me: '/api/auth/me',
+  adminUsers: '/api/admin/users',
+  adminCases: '/api/admin/cases',
+  adminAssignments: '/api/admin/assignments',
+  adminAssignmentBulk: '/api/admin/assignments/bulk',
+  adminAssignmentStats: '/api/admin/assignments/stats',
+  adminReviews: '/api/admin/reviews',
+  adminFinalize: '/api/admin/finalize',
 } as const;

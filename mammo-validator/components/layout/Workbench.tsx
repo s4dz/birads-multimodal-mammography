@@ -9,7 +9,7 @@ import { QueueRail } from '@/components/queue/QueueRail';
 import { ImageViewer } from '@/components/viewer/ImageViewer';
 import { ValidationPanel } from '@/components/panel/ValidationPanel';
 import { RelabelModal } from '@/components/relabel/RelabelModal';
-import { ReviewerSetup } from '@/components/setup/ReviewerSetup';
+import { LoginRequired } from '@/components/auth/LoginRequired';
 import { ShortcutFooter } from '@/components/layout/ShortcutFooter';
 import { Notice, SyncProgressStrip } from '@/components/layout/Notice';
 import {
@@ -71,25 +71,25 @@ export function Workbench() {
   const goToIndex = useWorkbenchStore((state) => state.goToIndex);
   const active = useWorkbenchStore(selectActiveCase);
   const reviewer = useWorkbenchStore((state) => state.reviewer);
-  const restoreReviewer = useWorkbenchStore((state) => state.restoreReviewer);
+  const sessionState = useWorkbenchStore((state) => state.sessionState);
+  const refreshSession = useWorkbenchStore((state) => state.refreshSession);
   const hydrateDecisions = useWorkbenchStore((state) => state.hydrateDecisions);
 
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    restoreReviewer();
-    setReady(true);
-  }, [restoreReviewer]);
+    void refreshSession().finally(() => setReady(true));
+  }, [refreshSession]);
 
   useValidationShortcuts();
 
   useEffect(() => {
-    if (reviewer !== null) {
+    if (sessionState === 'authed' && reviewer !== null) {
       void loadCases();
       // Pick up labels approved in /predict during this server session.
       void hydrateDecisions();
     }
-  }, [loadCases, hydrateDecisions, reviewer]);
+  }, [loadCases, hydrateDecisions, reviewer, sessionState]);
 
   if (!ready) {
     return (
@@ -102,8 +102,8 @@ export function Workbench() {
     );
   }
 
-  if (reviewer === null) {
-    return <ReviewerSetup />;
+  if (sessionState !== 'authed' || reviewer === null) {
+    return <LoginRequired />;
   }
 
   /* Dataset images that still have no AI label (and no decision recorded). */

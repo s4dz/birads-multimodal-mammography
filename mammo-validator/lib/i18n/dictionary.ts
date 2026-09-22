@@ -76,8 +76,8 @@ const MESSAGES = {
     vi: '2 · Duyệt dữ liệu — chấp nhận hoặc gán lại nhãn',
   },
   'help.mode2.step1': {
-    en: 'On first use, enter your reviewer name, specialty and reviewer ID.',
-    vi: 'Lần đầu sử dụng, nhập tên, chuyên khoa và mã bác sĩ của bạn.',
+    en: 'Sign in with your account. Your reviewer identity comes from the backend session.',
+    vi: 'Đăng nhập bằng tài khoản của bạn. Danh tính bác sĩ đến từ phiên đăng nhập trên máy chủ.',
   },
   'help.mode2.step2': {
     en: 'Choose a patient in the left rail — search by patient ID, or filter by review status.',
@@ -319,6 +319,11 @@ const MESSAGES = {
   'panel.aiFindings': { en: 'AI findings', vi: 'Phát hiện của AI' },
   'panel.noFindings': { en: 'None detected', vi: 'Không phát hiện' },
   'panel.modelConfidence': { en: 'Model confidence', vi: 'Độ tin cậy mô hình' },
+  'panel.originalDatasetLabel': { en: 'Original dataset label', vi: 'Nhãn gốc của bộ dữ liệu' },
+  'panel.originalLabelConfidence': {
+    en: 'Original-label confidence',
+    vi: 'Độ tin cậy của nhãn gốc',
+  },
   'panel.altProbabilities': {
     en: 'Alternative BI-RADS probabilities',
     vi: 'Xác suất BI-RADS khác',
@@ -373,6 +378,234 @@ const MESSAGES = {
   'setup.nameBlocker': { en: 'Add a reviewer name.', vi: 'Hãy nhập tên bác sĩ.' },
   'setup.specialtyBlocker': { en: 'Pick a specialty.', vi: 'Hãy chọn chuyên khoa.' },
   'setup.idBlocker': { en: 'Enter a reviewer ID.', vi: 'Hãy nhập mã bác sĩ.' },
+
+  /* ---------------- authentication ---------------- */
+  'auth.signInTitle': { en: 'Sign in', vi: 'Đăng nhập' },
+  'auth.brandSub': {
+    en: 'Multi-user QA workbench',
+    vi: 'Bảng kiểm QA đa người dùng',
+  },
+  'auth.username': { en: 'Username', vi: 'Tên đăng nhập' },
+  'auth.usernamePlaceholder': {
+    en: 'e.g. radiologist_01',
+    vi: 'ví dụ: radiologist_01',
+  },
+  'auth.password': { en: 'Password', vi: 'Mật khẩu' },
+  'auth.passwordPlaceholder': { en: '••••••••', vi: '••••••••' },
+  'auth.signIn': { en: 'Sign in', vi: 'Đăng nhập' },
+  'auth.signingIn': { en: 'Signing in…', vi: 'Đang đăng nhập…' },
+  'auth.demoHint': {
+    en: 'Demo accounts: admin / radiologist_01 … radiologist_04.',
+    vi: 'Tài khoản demo: admin / radiologist_01 … radiologist_04.',
+  },
+  'auth.errorRequired': {
+    en: 'Enter your username and password.',
+    vi: 'Hãy nhập tên đăng nhập và mật khẩu.',
+  },
+  'auth.loginRequiredTitle': {
+    en: 'You are not signed in',
+    vi: 'Bạn chưa đăng nhập',
+  },
+  'auth.loginRequiredHint': {
+    en: 'The backend session is missing or expired. Sign in to continue reviewing.',
+    vi: 'Phiên làm việc đã hết hạn hoặc không tồn tại. Hãy đăng nhập để tiếp tục.',
+  },
+  'auth.goToLogin': { en: 'Go to login', vi: 'Đến trang đăng nhập' },
+
+  /* ---------------- admin dashboard ---------------- */
+  'admin.title': { en: 'Admin', vi: 'Quản trị' },
+  'admin.navOverview': { en: 'Overview', vi: 'Tổng quan' },
+  'admin.navUsers': { en: 'Users', vi: 'Người dùng' },
+  'admin.navCases': { en: 'Cases', vi: 'Ca bệnh' },
+  'admin.navReviews': { en: 'Reviews', vi: 'Phân xử' },
+  'admin.statCases': { en: 'Total cases', vi: 'Tổng ca bệnh' },
+  'admin.statRadiologists': { en: 'Radiologists', vi: 'Bác sĩ chẩn đoán' },
+  'admin.statDecisions': { en: 'Decisions recorded', vi: 'Quyết định đã ghi' },
+  'admin.statPending': { en: 'Awaiting finalization', vi: 'Chờ chốt cuối' },
+  'admin.statDisagreements': { en: 'Disagreements', vi: 'Bất đồng' },
+  'admin.statFinalized': { en: 'Finalized', vi: 'Đã chốt' },
+  'admin.createUser': { en: 'Create user', vi: 'Tạo người dùng' },
+  'admin.name': { en: 'Name', vi: 'Tên' },
+  'admin.role': { en: 'Role', vi: 'Vai trò' },
+  'admin.specialty': { en: 'Specialty', vi: 'Chuyên khoa' },
+  'admin.status': { en: 'Status', vi: 'Trạng thái' },
+  'admin.active': { en: 'Active', vi: 'Hoạt động' },
+  'admin.inactive': { en: 'Inactive', vi: 'Ngừng' },
+  'admin.deactivate': { en: 'Deactivate', vi: 'Vô hiệu hóa' },
+  'admin.activate': { en: 'Activate', vi: 'Kích hoạt' },
+  'admin.case': { en: 'Case', vi: 'Ca bệnh' },
+  'admin.assignedTo': { en: 'Assigned to', vi: 'Được gán cho' },
+  'admin.assign': { en: 'Assign', vi: 'Gán việc' },
+  'admin.unassign': { en: 'Unassign', vi: 'Hủy gán' },
+  'admin.finalize': { en: 'Finalize', vi: 'Chốt cuối' },
+  'admin.finalized': { en: 'Finalized', vi: 'Đã chốt' },
+  'admin.finalLabel': { en: 'Final label', vi: 'Nhãn cuối' },
+  'admin.rationale': { en: 'Rationale', vi: 'Lý do' },
+  'admin.reviewStatus': { en: 'Status', vi: 'Trạng thái' },
+  'admin.view': { en: 'View', vi: 'Lát cắt' },
+  'admin.noRadiologists': {
+    en: 'No active radiologists.',
+    vi: 'Không có bác sĩ nào đang hoạt động.',
+  },
+  'admin.loading': { en: 'Loading…', vi: 'Đang tải…' },
+  'admin.loadError': {
+    en: 'Failed to load data',
+    vi: 'Không tải được dữ liệu',
+  },
+  'admin.retry': { en: 'Retry', vi: 'Thử lại' },
+  'admin.assigned': { en: 'Assigned', vi: 'Đã gán' },
+  'admin.notAssigned': { en: 'Not assigned', vi: 'Chưa gán' },
+  'admin.consensus': { en: 'Consensus', vi: 'Đồng thuận' },
+  'admin.disagreement': { en: 'Disagreement', vi: 'Bất đồng' },
+  'admin.notStarted': { en: 'Not started', vi: 'Chưa bắt đầu' },
+  'admin.needsFinalize': { en: 'Needs finalization', vi: 'Cần chốt cuối' },
+  'admin.reviewDetails': { en: 'Review arbitration', vi: 'Phân xử duyệt' },
+  'admin.backToOverview': {
+    en: 'Back to overview',
+    vi: 'Về tổng quan',
+  },
+  'admin.recentFinalize': {
+    en: 'Recently finalized',
+    vi: 'Mới chốt cuối',
+  },
+  'admin.noFinalizedYet': {
+    en: 'No finalized cases yet.',
+    vi: 'Chưa có ca nào được chốt cuối.',
+  },
+  'admin.reset': { en: 'Reset', vi: 'Đặt lại' },
+  'admin.onlyReviewed': {
+    en: 'Only reviewed',
+    vi: 'Chỉ ca đã duyệt',
+  },
+  'admin.onlyDisagreement': {
+    en: 'Only disagreements',
+    vi: 'Chỉ ca bất đồng',
+  },
+  'admin.noReviews': {
+    en: 'No reviews to show.',
+    vi: 'Không có ca nào để hiển thị.',
+  },
+  'admin.decisionCount': { en: 'decision(s)', vi: 'quyết định' },
+  'admin.noDecisionsYet': {
+    en: 'No decisions recorded yet.',
+    vi: 'Chưa có quyết định nào.',
+  },
+  'admin.confirmFinalize': {
+    en: 'Finalize',
+    vi: 'Chốt cuối',
+  },
+  'admin.cancel': { en: 'Cancel', vi: 'Hủy' },
+
+  /* ---------------- admin assignment manager ---------------- */
+  'admin.navAssign': {
+    en: 'Assign',
+    vi: 'Phân công',
+  },
+  'admin.selectedCases': {
+    en: 'Selected: {count} cases',
+    vi: 'Đã chọn: {count} ca',
+  },
+  'admin.selectedGroups': {
+    en: '{count} patient groups',
+    vi: '{count} nhóm bệnh nhân',
+  },
+  'admin.searchHint': {
+    en: 'Search patient / case…',
+    vi: 'Tìm bệnh nhân / ca…',
+  },
+  'admin.filterStatus': {
+    en: 'Status',
+    vi: 'Trạng thái',
+  },
+  'admin.statusAll': { en: 'All', vi: 'Tất cả' },
+  'admin.statusUnassigned': { en: 'Unassigned', vi: 'Chưa gán' },
+  'admin.statusAssigned': { en: 'Assigned', vi: 'Đã gán' },
+  'admin.statusInReview': { en: 'In review', vi: 'Đang duyệt' },
+  'admin.statusCompleted': { en: 'Completed', vi: 'Hoàn tất' },
+  'admin.filterAiClass': { en: 'AI class', vi: 'Lớp AI' },
+  'admin.aiAll': { en: 'All classes', vi: 'Tất cả lớp' },
+  'admin.selectAllVisible': { en: 'Select all visible', vi: 'Chọn tất cả đang hiển thị' },
+  'admin.deselectAll': { en: 'Deselect all', vi: 'Bỏ chọn tất cả' },
+  'admin.reviewerWorkload': {
+    en: 'Radiologists',
+    vi: 'Bác sĩ chẩn đoán',
+  },
+  'admin.columnCompleted': {
+    en: 'Completed',
+    vi: 'Đã duyệt',
+  },
+  'admin.modeAssignAll': {
+    en: 'Assign entire selection to each selected reviewer',
+    vi: 'Gán toàn bộ lựa chọn cho mỗi bác sĩ đã chọn',
+  },
+  'admin.modeBalance': {
+    en: 'Balance workload across selected reviewers',
+    vi: 'Cân bằng khối lượng giữa các bác sĩ đã chọn',
+  },
+  'admin.assignAllHint': {
+    en: 'Every selected reviewer gets every selected case (independent review).',
+    vi: 'Mỗi bác sĩ đã chọn nhận toàn bộ ca đã chọn (duyệt độc lập).',
+  },
+  'admin.balanceHint': {
+    en: 'Selected patient groups are split one group at a time, from the least-loaded reviewer up.',
+    vi: 'Các nhóm bệnh nhân được chia lần lượt, ưu tiên bác sĩ đang ít việc nhất.',
+  },
+  'admin.replaceExisting': {
+    en: 'Replace existing assignments',
+    vi: 'Thay thế phân công hiện tại',
+  },
+  'admin.replaceExistingHint': {
+    en: 'Removes the current reviewers of the selected cases. Submitted decisions are never deleted.',
+    vi: 'Gỡ bác sĩ hiện tại của các ca đã chọn. Quyết định đã nộp không bao giờ bị xoá.',
+  },
+  'admin.unassignSelected': {
+    en: 'Unassign selected',
+    vi: 'Hủy gán các ca đã chọn',
+  },
+  'admin.assignSelected': {
+    en: 'Assign selected',
+    vi: 'Gán các ca đã chọn',
+  },
+  'admin.previewTitle': {
+    en: 'Assignment preview',
+    vi: 'Xem trước phân công',
+  },
+  'admin.confirmAssignment': {
+    en: 'Confirm assignment',
+    vi: 'Xác nhận phân công',
+  },
+  'admin.caseGroupCount': {
+    en: '{groups} patient groups · {cases} cases',
+    vi: '{groups} nhóm bệnh nhân · {cases} ca',
+  },
+  'admin.warningPartialGroup': {
+    en: 'Some patients are only partially selected — their selected views will be assigned instead of the full set.',
+    vi: 'Một số bệnh nhân chỉ được chọn một phần — các lát cắt đã chọn sẽ được gán thay vì toàn bộ.',
+  },
+  'admin.warningExistingDecisions': {
+    en: '{count} selected case(s) already have submitted decisions. Reassigning keeps those decisions.',
+    vi: '{count} ca đã chọn đã có quyết định đã nộp. Việc gán lại vẫn giữ nguyên các quyết định đó.',
+  },
+  'admin.assignmentSuccess': {
+    en: '{cases} cases assigned across {reviewers} reviewer(s).',
+    vi: 'Đã gán {cases} ca cho {reviewers} bác sĩ.',
+  },
+  'admin.assignmentFailed': {
+    en: 'Assignment failed',
+    vi: 'Phân công thất bại',
+  },
+  'admin.noSelection': {
+    en: 'Select at least one case first.',
+    vi: 'Hãy chọn ít nhất một ca trước.',
+  },
+  'admin.noReviewers': {
+    en: 'Select at least one reviewer.',
+    vi: 'Hãy chọn ít nhất một bác sĩ.',
+  },
+  'admin.viewCount': {
+    en: '{count} views',
+    vi: '{count} lát cắt',
+  },
 } as const satisfies Record<string, Message>;
 
 export type TranslationKey = keyof typeof MESSAGES;

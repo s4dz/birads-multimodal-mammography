@@ -237,6 +237,14 @@ export function ValidationPanel() {
   const approved = decision?.status === 'APPROVED';
   const aiPct = Math.round(active.ai.confidence * 100);
 
+  const originalFinding = active.ai.findings.find(
+    (finding) => finding.originalClass && finding.modelClass
+  );
+  const originalClass = originalFinding?.originalClass ?? null;
+  const originalLabel =
+    originalClass?.grade ??
+    (originalClass ? `${originalClass.name} (${originalClass.range})` : '');
+
   return (
     <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-slate-800 bg-slate-900/40 xl:w-96">
       <div className="space-y-5 p-4">
@@ -249,6 +257,28 @@ export function ValidationPanel() {
             </h2>
           </div>
           <div className="rounded-xl border border-slate-700/70 bg-slate-900/80 p-3.5">
+            {originalFinding && originalClass ? (
+              <>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                  {t('panel.originalDatasetLabel')}
+                </p>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <ToneBadge
+                    tone={toneForClass(originalClass.index)}
+                    className="px-2 py-0.5 text-xs"
+                  >
+                    {originalLabel}
+                  </ToneBadge>
+                  {typeof originalFinding.originalConfidence === 'number' ? (
+                    <span className="shrink-0 font-mono text-[10px] text-slate-500">
+                      {t('panel.originalLabelConfidence')}{' '}
+                      {Math.round(originalFinding.originalConfidence * 100)}%
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mb-3 mt-3 border-t border-slate-800" />
+              </>
+            ) : null}
             <div className="flex items-start justify-between gap-2">
               <ToneBadge
                 tone={toneForClass(predictedClass.index)}
@@ -323,7 +353,7 @@ export function ValidationPanel() {
                         </p>
                         <div>
                           <p className="text-[10px] text-slate-500">
-                            Original label
+                            {t('panel.originalDatasetLabel')}
                           </p>
                           <p className="text-[11px] font-medium text-slate-200">
                             {origin!.name}{' '}

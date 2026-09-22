@@ -1,9 +1,6 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import {
-  REVIEWER_STORAGE_KEY,
-  type ReviewerProfile,
-} from '@/lib/config';
+import { type ReviewerProfile } from '@/lib/config';
 import { biradsAuditLabel } from '@/lib/taxonomy';
 import type {
   StudyCase,
@@ -30,6 +27,13 @@ export interface NoticeMessage {
   text: string;
 }
 
+/**
+ * Backend session state. `reviewer` is populated only from the authenticated
+ * `/api/auth/me` user; the browser-local reviewer identity has been removed —
+ * the backend is the source of truth.
+ */
+export type SessionState = 'idle' | 'loading' | 'authed' | 'anonymous';
+
 interface WorkbenchState {
   cases: StudyCase[];
   isLoadingCases: boolean;
@@ -37,8 +41,9 @@ interface WorkbenchState {
 
   activeIndex: number;
 
-  /** Reviewer identity for the current session (persisted in localStorage). */
+  /** Backend-authenticated reviewer identity for this session. */
   reviewer: ReviewerProfile | null;
+  sessionState: SessionState;
 
   /** Latest decision per image id (source of truth for the side panel). */
   recordByImageId: Record<string, ValidationRecord>;
@@ -55,9 +60,10 @@ interface WorkbenchState {
   goToNextPatientGroup: () => void;
   goToPrevPatientGroup: () => void;
 
-  setReviewer: (profile: ReviewerProfile) => void;
-  restoreReviewer: () => void;
-  clearReviewer: () => void;
+  /** Resolve the reviewer from the backend session cookie. */
+  refreshSession: () => Promise<void>;
+  /** Log out (clears the session cookie server-side). */
+  logout: () => Promise<void>;
 
   /** Pull decisions already recorded on the server into local state. */
   hydrateDecisions: () => Promise<void>;
@@ -68,18 +74,6 @@ interface WorkbenchState {
   closeRelabel: () => void;
 
   dismissNotice: () => void;
-}
-
-function isReviewerProfile(value: unknown): value is ReviewerProfile {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.id === 'string' &&
-    candidate.id.length > 0 &&
-    typeof candidate.name === 'string' &&
-    candidate.name.length > 0 &&
-    typeof candidate.specialty === 'string'
-  );
 }
 
 let noticeSequence = 0;
@@ -185,40 +179,48 @@ export const useWorkbenchStore = create<WorkbenchState>()(
     casesError: null,
     activeIndex: 0,
     reviewer: null,
+    sessionState: 'idle',
     recordByImageId: {},
     syncByImageId: {},
     isRelabelOpen: false,
     notice: null,
 
-    setReviewer: (profile) => {
-      set({ reviewer: profile });
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(
-          REVIEWER_STORAGE_KEY,
-          JSON.stringify(profile)
-        );
-      }
-    },
-
-    restoreReviewer: () => {
-      if (typeof window === 'undefined') return;
-      const raw = window.localStorage.getItem(REVIEWER_STORAGE_KEY);
-      if (!raw) return;
+    refreshSession: async () => {
+      set({ sessionState: 'loading' });
       try {
-        const parsed: unknown = JSON.parse(raw);
-        if (isReviewerProfile(parsed)) {
-          set({ reviewer: parsed });
+        const { fetchMe } = await import('@/lib/api-client');
+        const user = await fetchMe();
+        if (!user) {
+          set({ reviewer: null, sessionState: 'anonymous' });
+          return;
         }
+        const profile: ReviewerProfile = {
+          id: user.id,
+          name: user.name,
+          specialty: user.specialty,
+        };
+        set({ reviewer: profile, sessionState: 'authed' });
       } catch {
-        // Corrupt entry — ignore and let the reviewer re-enter their profile.
+        // A failing /api/auth/me means we cannot trust the session: demand login.
+        set({ reviewer: null, sessionState: 'anonymous' });
       }
     },
 
-    clearReviewer: () => {
-      set({ reviewer: null });
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem(REVIEWER_STORAGE_KEY);
+    logout: async () => {
+      try {
+        const apiClient = await import('@/lib/api-client');
+        await apiClient.logout();
+      } catch {
+        // Even if the API call fails, reset the client session state.
       }
+      set({
+        reviewer: null,
+        sessionState: 'anonymous',
+        cases: [],
+        recordByImageId: {},
+        syncByImageId: {},
+        activeIndex: 0,
+      });
     },
 
     hydrateDecisions: async () => {

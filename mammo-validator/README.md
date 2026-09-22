@@ -40,7 +40,7 @@ ensemble through `POST /api/predict` — see [Model & prediction](#model--predic
 
 ## Tech stack
 
-- **Framework** — Next.js 16 (webpack), React 19, TypeScript strict
+- **Framework** — Next.js 16.3.4 (webpack), React 19, TypeScript strict
 - **Styling** — Tailwind CSS v4 (`@tailwindcss/postcss`)
 - **State** — Zustand 5 (image queue, active case, decisions, sync status)
 - **DICOM** — Cornerstone3D v5 packages:
@@ -49,7 +49,8 @@ ensemble through `POST /api/predict` — see [Model & prediction](#model--predic
 
 ## Getting started
 
-Prerequisites: **Node.js ≥ 20.9** and npm. Python ≥ 3.10 is only needed if you
+Prerequisites: **Node.js ≥ 22.13** and npm (the app uses `node:sqlite`, which
+requires Node ≥ 22.13). Python ≥ 3.10 is only needed if you
 want to regenerate the sample images.
 
 ### Windows — one-command launcher
@@ -103,6 +104,30 @@ npm run dev
 > graph. The scripts are pinned to webpack (`next dev --webpack` / `next build
 > --webpack`) which is fully supported and verified. You can still try plain
 > `npx next dev` if you prefer Turbopack.
+
+### Signing in
+
+The app now starts at a **login screen** — reviewer identity comes from the
+backend session, not `localStorage`. The full workflow:
+
+```bash
+npm install          # first run
+npm run db:seed      # create + seed data/mammoqa.db (SQLite via node:sqlite)
+npm run dev          # http://localhost:3000  → you land on /login
+```
+
+Demo accounts (seeded by `scripts/seed-db.ts`):
+
+| Role | Username | Password | Notes |
+| --- | --- | --- | --- |
+| Admin | `admin` | `admin123` | `/admin` — users, case assignment, arbitration |
+| Radiologist | `radiologist_01` | `rad123` | Assigned to cases `mg-2401…mg-2406` |
+| Radiologist | `radiologist_02` | `rad123` | Assigned to cases `mg-2404…mg-2409` |
+| Radiologist | `radiologist_03` | `rad123` | Assigned to cases `mg-2407…mg-2410` |
+| Radiologist | `radiologist_04` | `rad123` | Seeded but **not assigned / inactive** — use to test admin activate + assign |
+
+Overlapping assignments (`mg-2404…mg-2406`, `mg-2407…mg-2409`) demonstrate how
+the admin arbitration view flags **consensus** vs **disagreement**.
 
 ### Production build
 
@@ -337,18 +362,32 @@ gets `predictedClass` + `classProbabilities` from the OOF output.
 
 ## Production considerations / current demo limits
 
-- The validation log is an **in-memory module store** — swap
-  `lib/server-validation-store.ts` for a DB / FHIR / DICOM-SR repository
-  without touching routes or the client.
-- Reviewer identity is collected on first run before the workbench loads.
-- The profile contains name, specialty, and a reviewer ID; the ID is
-  auto-generated (`RAD-<year>-<nnnn>`) but editable.
-- The profile is persisted per browser using `localStorage`
-  (`mammoqa.reviewer`), so it survives reloads.
-- A reviewer can switch profiles from the header (returns to the setup screen).
+- Persistence is a real **SQLite** database (`data/mammoqa.db`) via Node's
+  built-in `node:sqlite` — no ORM. Path overridable with `MAMMO_DB_PATH`.
+- **Auth**: signed session cookie (`mammoqa.session`, HMAC-SHA256, 8 h TTL).
+  Secrets come from `MAMMO_AUTH_SECRET` or a path-derived fallback. Passwords
+  are hashed with `scrypt`.
+- **Roles**: `admin` (users, assignments, arbitration, finalization) and
+  `radiologist` (review only assigned images). Decision rows keep the
+  `radiologist_id` at write time; results show the reviewer identity.
+- Two reviewers on the same image = independent decisions; the admin
+  arbitration screen shows all of them and lets the admin pick the final label.
+  There is **no automatic majority vote** — a human decides.
+- Reviewer identity is decided at sign-in, not per-browser `localStorage`.
 - Demo DICOMs are uncompressed — web workers / compressed codecs are not
   exercised.
 - Multi-frame stacks and hanging protocols are not part of this demo, but the
   tool group + `setStack` already accept a stack of image ids.
+
+## Backend routes
+
+| Route | Access | Purpose |
+| --- | --- | --- |
+| `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/auth/me` | public / signed-in | session management |
+| `GET /api/cases` · `GET /api/cases/[imageId]` · `POST /api/cases/[imageId]/decision` | radiologist + admin | worklist + decisions (radiologist sees only assigned) |
+| `POST /api/validation` · `GET /api/validation` | radiologist | legacy decision sink (identity from session) + own log |
+| `GET\|POST /api/admin/users` · `PATCH /api/admin/users/[id]` | admin | create users, activate/deactivate |
+| `GET /api/admin/cases` · `GET\|POST /api/admin/assignments` | admin | case list + assign/unassign |
+| `GET /api/admin/reviews` · `POST /api/admin/finalize` | admin | arbitration + finalization |
 
 

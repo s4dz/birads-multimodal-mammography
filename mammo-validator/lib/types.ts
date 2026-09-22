@@ -174,6 +174,122 @@ export interface ValidationRecord {
 
 export type SyncState = 'idle' | 'pending' | 'synced' | 'error';
 
+/* ------------------------------------------------------------------ */
+/* Multi-user backend (authentication + admin)                         */
+/* ------------------------------------------------------------------ */
+
+export type UserRole = 'admin' | 'radiologist';
+
+/** Safe, serializable view of a user (never includes the password hash). */
+export interface AppUser {
+  id: string;
+  username: string;
+  name: string;
+  role: UserRole;
+  specialty: string;
+  active: boolean;
+  createdAt: string;
+}
+
+/** A case-to-radiologist work assignment (one row per (case, reviewer)). */
+export interface Assignment {
+  imageId: string;
+  radiologistId: string;
+  assignedBy: string;
+  assignedAt: string;
+}
+
+/** Admin-finalised ground-truth decision for an image. */
+export interface CaseFinalization {
+  imageId: string;
+  finalLabel: string;
+  rationale: string;
+  decidedBy: string;
+  finalizedAt: string;
+}
+
+/** Per-radiologist workload used by the Assignment Manager. */
+export interface RadiologistWorkload {
+  radiologistId: string;
+  /** Current number of assigned images. */
+  assigned: number;
+  /** Number of submitted decisions. */
+  completed: number;
+}
+
+export type BulkAssignmentAction = 'assign' | 'unassign';
+export type BulkAssignmentMode = 'all' | 'balanced';
+
+/** POST /api/admin/assignments/bulk body. */
+export interface BulkAssignmentRequest {
+  imageIds: string[];
+  radiologistIds: string[];
+  action?: BulkAssignmentAction;
+  mode?: BulkAssignmentMode;
+  /** Remove existing assignments for the selected cases first. */
+  replaceExisting?: boolean;
+  /** Compute and return the plan without writing anything. */
+  dryRun?: boolean;
+}
+
+/** One reviewer's share of a bulk assignment. */
+export interface BulkAssignmentTarget {
+  radiologistId: string;
+  assignedImages: number;
+  patientGroups: number;
+}
+
+/** POST /api/admin/assignments/bulk response. */
+export interface BulkAssignmentResponse {
+  ok: boolean;
+  dryRun: boolean;
+  totalImages: number;
+  totalGroups: number;
+  targets: BulkAssignmentTarget[];
+  message?: string;
+}
+
+/** Consensus state derived from the radiologist decisions for one image. */
+export type ReviewStatus =
+  | 'not_started'
+  | 'consensus'
+  | 'disagreement'
+  | 'finalized';
+
+/** Admin worklist row: a case plus its live assignment/decision snapshot. */
+export interface AdminCaseView {
+  imageId: string;
+  patient: PatientDemographics;
+  laterality: Laterality;
+  view: MammogramView;
+  needsPrediction: boolean;
+  ai: {
+    biradsGrade: BiRadsGrade;
+    predictedClass: AiClassLabel;
+    confidence: number;
+  };
+  assignedRadiologists: string[];
+  decisions: number;
+  reviewStatus: ReviewStatus;
+  finalized: boolean;
+}
+
+/** One reviewed image with every radiologist decision, for admin arbitration. */
+export interface CaseReview {
+  imageId: string;
+  patient: PatientDemographics;
+  acquisition: AcquisitionInfo;
+  needsPrediction: boolean;
+  ai: {
+    biradsGrade: BiRadsGrade;
+    predictedClass: AiClassLabel;
+    confidence: number;
+  };
+  decisions: Array<ValidationRecord & { radiologistName: string }>;
+  reviewStatus: ReviewStatus;
+  finalization: CaseFinalization | null;
+}
+
 export interface CasesApiResponse {
   cases: StudyCase[];
 }

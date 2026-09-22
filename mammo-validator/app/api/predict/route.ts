@@ -4,6 +4,8 @@ import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
+import { toErrorResponse } from '@/lib/app-error';
+import { requireUser } from '@/lib/auth';
 
 /**
  * `/api/predict` — runs the PyTorch + CatBoost ensemble in `ml/predict.py`.
@@ -270,6 +272,11 @@ async function storeUpload(
 /** GET -> worker/model health plus a few bundled samples for the picker. */
 export async function GET(): Promise<NextResponse> {
   try {
+    await requireUser();
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+  try {
     const description = await worker().request({ command: 'describe' });
     return NextResponse.json({
       ok: true,
@@ -291,6 +298,11 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  try {
+    await requireUser();
+  } catch (error) {
+    return toErrorResponse(error);
+  }
   const contentType = request.headers.get('content-type') ?? '';
   let payload: Record<string, unknown>;
 

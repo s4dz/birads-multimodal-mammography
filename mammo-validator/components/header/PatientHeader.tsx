@@ -57,10 +57,10 @@ export function PatientHeader() {
   const activeIndex = useWorkbenchStore((state) => state.activeIndex);
   const goToIndex = useWorkbenchStore((state) => state.goToIndex);
   const reviewer = useWorkbenchStore((state) => state.reviewer);
-  const clearReviewer = useWorkbenchStore((state) => state.clearReviewer);
+  const logout = useWorkbenchStore((state) => state.logout);
   const recordByImageId = useWorkbenchStore((state) => state.recordByImageId);
   const syncByImageId = useWorkbenchStore((state) => state.syncByImageId);
-  const [showSwitchReviewer, setShowSwitchReviewer] = useState(false);
+  const [showLogout, setShowLogout] = useState(false);
   const active = cases[activeIndex];
   const activeGroup = useActivePatientGroup(cases, activeIndex);
   const activeViewIndex = activeGroup ? activeIndex - activeGroup.startIndex : 0;
@@ -201,44 +201,44 @@ export function PatientHeader() {
         </div>
         <button
           type="button"
-          onClick={() => setShowSwitchReviewer(true)}
-          title="Switch reviewer"
+          onClick={() => setShowLogout(true)}
+          title="Log out"
           className="hidden items-center gap-1 rounded-md p-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-300 sm:flex"
         >
           <LogOut className="size-3.5" />
-          Switch
+          Log out
         </button>
       </div>
 
       <Modal
-        open={showSwitchReviewer}
-        onClose={() => setShowSwitchReviewer(false)}
-        title="Switch reviewer?"
+        open={showLogout}
+        onClose={() => setShowLogout(false)}
+        title="Log out?"
         footer={
           <>
             <Button
               type="button"
               variant="secondary"
-              onClick={() => setShowSwitchReviewer(false)}
+              onClick={() => setShowLogout(false)}
             >
               Cancel
             </Button>
             <Button
               type="button"
-              variant="primary"
+              variant="danger"
               onClick={() => {
-                clearReviewer();
-                setShowSwitchReviewer(false);
+                setShowLogout(false);
+                void logout();
               }}
             >
-              Switch reviewer
+              Log out
             </Button>
           </>
         }
       >
         <div className="space-y-3">
           <p className="text-xs leading-relaxed text-slate-500">
-            You are currently reviewing as:
+            You are currently signed in as:
           </p>
           <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2.5">
             <UserRound className="size-4 text-slate-500" />
@@ -252,10 +252,8 @@ export function PatientHeader() {
             </div>
           </div>
           <p className="text-xs leading-relaxed text-slate-600">
-            Switching generates a new reviewer ID. It will be stamped on all
-            future decisions; already-recorded decisions stay linked to the
-            current reviewer and remain saved. You will be returned to the
-            setup screen.
+            Signing out ends the server session. Decisions already recorded
+            stay linked to your account.
           </p>
         </div>
       </Modal>
