@@ -149,7 +149,7 @@ class Predictor:
     def describe(self) -> dict:
         """Health report used by /api/predict to surface load problems."""
         return {
-            "modelsDir": str(self.models_dir),
+            "modelsConfigured": self.ready,
             "folds": self.fold_numbers,
             "loaded": len(self.folds),
             "loadErrors": self.load_errors,

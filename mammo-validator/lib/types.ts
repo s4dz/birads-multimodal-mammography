@@ -343,7 +343,7 @@ export interface PredictResponse {
 
 /** Ensemble health reported by ``GET /api/predict``. */
 export interface PredictWorkerInfo {
-  modelsDir: string;
+  modelsConfigured: boolean;
   folds: number[];
   loaded: number;
   loadErrors: string[];
