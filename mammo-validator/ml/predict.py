@@ -16,8 +16,11 @@ Usage:
 ``--serve`` keeps every fold resident in memory so the Next.js API can reuse a
 single process instead of paying the model-load cost on every request.
 
-Request line  : {"image_cc": "<abs path>", "image_mlo": "<abs path>", "age": 55, "density": "C"}
-Response line : {"ok": true, "label": 2, ...} or {"ok": false, "error": "..."}
+Request line  : {"age": 55, "density": "C",
+                 "breasts": [{"laterality": "R", "image_cc": "<abs>", "image_mlo": "<abs>"}, ...]}  # 1-2 breasts
+                 Legacy single-pair: {"image_cc": "<abs>", "image_mlo": "<abs>", "age": 55, "density": "C"}
+Response line : {"ok": true, "breasts": [{"ok": true, "laterality": "R", "label": 2, ...}, ...]}
+                 or per-breast {"ok": false, "error", "laterality"} / top-level {"ok": false, "error"}
 """
 
 from __future__ import annotations
@@ -166,6 +169,7 @@ class Predictor:
         mlo_path: Path | str,
         age: float = DEFAULT_AGE,
         density: object = None,
+        laterality: str | None = None,
     ) -> dict:
         """Score the CC + MLO pair of one breast and return the joint label."""
         if not self.folds:
@@ -210,6 +214,7 @@ class Predictor:
 
         return {
             "ok": True,
+            "laterality": laterality or "",
             "label": label,
             "labelName": CLASS_NAMES_3[label],
             "biradsRange": CLASS_BIRADS_RANGE[label],
@@ -232,25 +237,59 @@ class Predictor:
         }
 
 
+def _score_one(predictor: Predictor, breast: dict, payload: dict) -> dict:
+    """Score a single ``{laterality, image_cc, image_mlo}`` breast pair."""
+    cc_path = breast.get("image_cc") or ""
+    mlo_path = breast.get("image_mlo") or ""
+    if not cc_path or not mlo_path:
+        return {
+            "ok": False,
+            "laterality": breast.get("laterality") or "",
+            "error": (
+                "Both image_cc and image_mlo are required for a breast "
+                "(per-breast inference over the CC + MLO pair)."
+            ),
+        }
+    laterality = str(breast.get("laterality") or "").strip().upper()
+    return predictor.predict(
+        cc_path,
+        mlo_path,
+        age=float(payload.get("age", DEFAULT_AGE)),
+        density=payload.get("density"),
+        laterality=laterality or None,
+    )
+
+
 def _handle_request(predictor: Predictor, payload: dict) -> dict:
-    """Never raises — errors travel back to the caller as JSON."""
+    """Never raises — errors travel back to the caller as JSON.
+
+    Request      : {"age": 55, "density": "C",
+                    "breasts": [{"laterality": "R", "image_cc": "...", "image_mlo": "..."}, ...]}
+    Legacy       : {"image_cc": "...", "image_mlo": "...", "age": 55, "density": "C"}
+    Response     : {"ok": true, "breasts": [{...score..., "laterality": "R"}, ...]}
+    Per-breast   : scoring errors stay inside the breast entry (entry.ok=false);
+                   the top-level ok only reflects whether the request was valid.
+    """
     try:
-        cc_path = payload.get("image_cc") or ""
-        mlo_path = payload.get("image_mlo") or ""
-        if not cc_path or not mlo_path:
+        breasts = payload.get("breasts")
+        if isinstance(breasts, list) and breasts:
+            if len(breasts) > 2:
+                return {
+                    "ok": False,
+                    "error": "At most 2 breasts (L and R) can be scored per request.",
+                }
+            results = [_score_one(predictor, b, payload) for b in breasts]
             return {
-                "ok": False,
-                "error": (
-                    "Both image_cc and image_mlo are required "
-                    "(per-breast inference over the CC + MLO pair)."
-                ),
+                "ok": True,
+                "breasts": results,
+                "count": len(results),
             }
-        return predictor.predict(
-            cc_path,
-            mlo_path,
-            age=float(payload.get("age", DEFAULT_AGE)),
-            density=payload.get("density"),
-        )
+        # Legacy single-pair payload -> wrapped as one breast.
+        return {
+            "ok": True,
+            "breasts": [_score_one(predictor, payload, payload)],
+            "count": 1,
+        }
     except Exception as exc:  # noqa: BLE001 - reported to the API caller
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 

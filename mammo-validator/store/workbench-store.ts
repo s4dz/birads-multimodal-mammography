@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { type ReviewerProfile } from '@/lib/config';
 import { biradsAuditLabel } from '@/lib/taxonomy';
+import { fuseBreastLabel } from '@/lib/breast-fusion';
 import type {
   StudyCase,
   SyncState,
@@ -84,19 +85,19 @@ function makeNotice(kind: NoticeKind, text: string): NoticeMessage {
 }
 
 /**
- * Build one decision record per view in a patient group. status, finalLabel,
- * notes, radiologistId and timestamp are shared across the exam; originalLabel
- * stays per-view (each image carries its own AI BI-RADS label).
+ * Build one decision record per view of a single breast. status, finalLabel,
+ * notes, radiologistId and timestamp are shared across the breast's CC + MLO
+ * views; originalLabel stays per-view (each image carries its own AI label).
  */
-function buildGroupRecords(
-  cases: StudyCase[],
+function buildBreastRecords(
+  views: StudyCase[],
   status: ValidationRecord['status'],
   finalLabel: string,
   notes: string,
   radiologistId: string
 ): ValidationRecord[] {
   const timestamp = new Date().toISOString();
-  return cases.map((c) => ({
+  return views.map((c) => ({
     imageId: c.imageId,
     radiologistId,
     originalLabel: c.needsPrediction ? 'Unlabeled' : biradsAuditLabel(c.ai.biradsGrade),
@@ -131,8 +132,8 @@ export const useWorkbenchStore = create<WorkbenchState>()(
               ? `Approved AI label for ${records[0].imageId}`
               : `Relabeled ${records[0].imageId} → ${records[0].finalLabel}`
             : records[0].status === 'APPROVED'
-              ? `Approved AI label for patient · ${records.length} views`
-              : `Relabeled patient → ${records[0].finalLabel} · ${records.length} views`
+              ? `Approved AI label for breast · ${records.length} views`
+              : `Relabeled breast → ${records[0].finalLabel} · ${records.length} views`
         ),
       };
     });
@@ -330,20 +331,21 @@ export const useWorkbenchStore = create<WorkbenchState>()(
 
     approveActive: async () => {
       const state = get();
-      const group = selectActivePatientGroup(state);
-      if (!group) return;
-      const cases = group.cases;
-      if (cases.some((c) => state.syncByImageId[c.imageId] === 'pending')) {
+      const active = state.cases[state.activeIndex];
+      if (!active) return;
+      // Decisions are per breast: only the CC + MLO views of this side.
+      const views = selectBreastViews(state);
+      if (views.length === 0) return;
+      if (views.some((c) => state.syncByImageId[c.imageId] === 'pending')) {
         return;
       }
 
-      const anchor = cases[state.activeIndex - group.startIndex];
-      const records = buildGroupRecords(
-        cases,
+      const fused = fuseBreastLabel(views);
+      if (!fused) return;
+      const records = buildBreastRecords(
+        views,
         'APPROVED',
-        anchor.needsPrediction
-          ? 'Unlabeled'
-          : biradsAuditLabel(anchor.ai.biradsGrade),
+        `${fused.name} (${fused.range})`,
         '',
         get().reviewer?.id ?? ''
       );
@@ -352,15 +354,16 @@ export const useWorkbenchStore = create<WorkbenchState>()(
 
     relabelActive: async (finalLabel, notes) => {
       const state = get();
-      const group = selectActivePatientGroup(state);
-      if (!group) return;
-      const cases = group.cases;
-      if (cases.some((c) => state.syncByImageId[c.imageId] === 'pending')) {
+      const active = state.cases[state.activeIndex];
+      if (!active) return;
+      const views = selectBreastViews(state);
+      if (views.length === 0) return;
+      if (views.some((c) => state.syncByImageId[c.imageId] === 'pending')) {
         return;
       }
 
-      const records = buildGroupRecords(
-        cases,
+      const records = buildBreastRecords(
+        views,
         'RELABELED',
         finalLabel,
         notes,
@@ -448,6 +451,21 @@ export function selectActivePatientGroup(state: WorkbenchState): PatientGroup | 
   const groups = selectPatientGroups(state);
   const activeIndex = state.activeIndex;
   return groups.find(g => activeIndex >= g.startIndex && activeIndex <= g.endIndex);
+}
+
+/**
+ * Views of the breast (same patient + laterality) containing the active image.
+ * This is the unit review decisions are scoped to: approve / relabel apply to
+ * every view of one breast, never to the whole patient (both sides).
+ */
+export function selectBreastViews(state: WorkbenchState): StudyCase[] {
+  const active = state.cases[state.activeIndex];
+  if (!active) return [];
+  const pid = active.patient.id;
+  const side = active.acquisition.laterality;
+  return state.cases.filter(
+    (c) => c.patient.id === pid && c.acquisition.laterality === side
+  );
 }
 
 export function selectActiveCaseIndexInGroup(state: WorkbenchState): number {

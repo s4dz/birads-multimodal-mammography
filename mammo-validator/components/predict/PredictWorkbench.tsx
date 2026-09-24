@@ -10,14 +10,17 @@ import {
   ImageIcon,
   LoaderCircle,
   Play,
+  Plus,
+  Upload,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { ImageViewer } from '@/components/viewer/ImageViewer';
 import {
-  fetchPredictHealth,
-  predictSample,
+  predictBreasts,
+  predictBreastsUpload,
   submitValidation,
+  fetchPredictHealth,
 } from '@/lib/api-client';
 import { toneClasses } from '@/lib/taxonomy';
 import { useTranslation } from '@/lib/i18n/LanguageProvider';
@@ -25,6 +28,8 @@ import type { TranslationKey } from '@/lib/i18n/dictionary';
 import { useWorkbenchStore } from '@/store/workbench-store';
 import type {
   DensityChoice,
+  Laterality,
+  PredictBreastResult,
   PredictResponse,
   StudyCase,
   Tone,
@@ -34,12 +39,11 @@ import type {
 /**
  * Mode 1 — Predict.
  *
- * Score one breast by feeding its CC + MLO pair to the 4-fold SwinV2 +
- * breast-fusion + CatBoost ensemble (`/api/predict` -> `ml/predict.py`),
- * which returns a single joint BI-RADS assessment for the breast. The CC
- * image is previewed with the same viewer used in review mode, so
- * pan / zoom / brightness / contrast work identically while you inspect the
- * finding.
+ * Score one or both breasts: upload (or pick from bundled samples) the CC +
+ * MLO pair of a breast — 2 images — and run the 4-fold SwinV2 + breast-fusion
+ * ensemble (`/api/predict` -> `ml/predict.py`). Add the other breast (4 images)
+ * to get two independent per-breast assessments, which may differ. Each breast
+ * is previewed with the same viewer used in review mode.
  */
 
 /** The three classes the model was trained on (BI-RADS collapsed). */
@@ -84,7 +88,34 @@ function basenameOf(path: string): string {
   return path.split('/').pop() ?? path;
 }
 
-/** Minimal StudyCase so the prediction image gets the full viewer controls. */
+/** One image slot: either a bundled sample or an uploaded local file. */
+interface ViewSource {
+  kind: 'sample' | 'file';
+  /** Sample path (JSON mode) or an object URL preview (upload mode). */
+  url: string;
+  label: string;
+  isDicom: boolean;
+  /** Present only for uploads; used to build the multipart request. */
+  file?: File;
+}
+
+interface BreastSlot {
+  laterality: Laterality;
+  cc: ViewSource | null;
+  mlo: ViewSource | null;
+}
+
+/** Resolve a ViewSource into a multipart File (samples are fetched). */
+async function toFile(source: ViewSource): Promise<File> {
+  if (source.kind === 'file' && source.file) return source.file;
+  const response = await fetch(source.url);
+  const blob = await response.blob();
+  return new File([blob], source.label, {
+    type: blob.type || 'image/png',
+  });
+}
+
+/** Minimal StudyCase so a prediction image gets the full viewer controls. */
 function previewCaseFor(url: string, fileName: string): StudyCase {
   return {
     imageId: fileName,
@@ -95,7 +126,7 @@ function previewCaseFor(url: string, fileName: string): StudyCase {
       description: 'Prediction input',
       accessionNumber: '—',
     },
-    acquisition: { laterality: 'L', view: 'CC' },
+    acquisition: { laterality: 'R', view: 'CC' },
     image: { type: isDicomName(fileName) ? 'dicom' : 'png', url },
     ai: {
       biradsGrade: '1',
@@ -208,8 +239,11 @@ function FoldRow({
   );
 }
 
-/** Dropdown selecting a bundled sample for one view (CC or MLO). */
-function ViewPicker({
+/**
+ * One CC/MLO input: lets the user either upload a local file or select one of
+ * the bundled samples. Produces a {@link ViewSource} or clears it.
+ */
+function ViewInput({
   labelKey,
   samples,
   value,
@@ -217,30 +251,33 @@ function ViewPicker({
 }: {
   labelKey: TranslationKey;
   samples: string[];
-  value: string | null;
-  onChange: (next: string) => void;
+  value: ViewSource | null;
+  onChange: (next: ViewSource | null) => void;
 }) {
   const { t } = useTranslation();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFile = useCallback(
+    (file: File) => {
+      onChange({
+        kind: 'file',
+        url: URL.createObjectURL(file),
+        label: file.name,
+        isDicom: isDicomName(file.name),
+        file,
+      });
+    },
+    [onChange]
+  );
+
   return (
-    <label className="block space-y-1">
-      <span className="text-xs text-slate-400">{t(labelKey)}</span>
-      <div className="flex items-center gap-1">
-        <select
-          value={value ?? ''}
-          onChange={(event) => onChange(event.target.value)}
-          className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200 focus:border-sky-500 focus:outline-none"
-        >
-          <option value="">{t('predict.chooseView')}</option>
-          {samples.map((sample) => (
-            <option key={sample} value={sample} title={sample}>
-              {basenameOf(sample)}
-            </option>
-          ))}
-        </select>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-1">
+        <span className="text-xs text-slate-400">{t(labelKey)}</span>
         {value ? (
           <button
             type="button"
-            onClick={() => onChange('')}
+            onClick={() => onChange(null)}
             title={t('predict.clearSelection')}
             className="inline-flex size-5 shrink-0 items-center justify-center rounded text-slate-500 transition-colors hover:text-slate-200"
           >
@@ -248,13 +285,167 @@ function ViewPicker({
           </button>
         ) : null}
       </div>
-    </label>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".png,.jpg,.jpeg,.dcm,.dicom,image/png,image/jpeg"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) handleFile(file);
+          event.target.value = '';
+        }}
+      />
+
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        className={[
+          'flex h-9 w-full items-center gap-2 rounded-lg border px-3 text-sm transition-colors',
+          value
+            ? 'border-slate-700 bg-slate-900 text-slate-300'
+            : 'border-dashed border-slate-700 bg-slate-950 text-slate-400 hover:border-sky-500/60 hover:text-slate-200',
+        ].join(' ')}
+      >
+        <Upload className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-left">
+          {value ? (
+            <span className="font-mono text-[11px] text-sky-200">
+              {value.label}
+            </span>
+          ) : (
+            <span className="text-[11px]">{t('predict.uploadOrSample')}</span>
+          )}
+        </span>
+      </button>
+
+      <div className="flex items-center gap-1">
+        <span className="shrink-0 text-[10px] uppercase tracking-wider text-slate-600">
+          {t('predict.bundledSamples')}
+        </span>
+        <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+          {samples.map((sample) => {
+            const isSelected = value?.kind === 'sample' && value.url === sample;
+            return (
+              <button
+                key={sample}
+                type="button"
+                title={sample}
+                onClick={() =>
+                  onChange(
+                    isSelected
+                      ? null
+                      : {
+                          kind: 'sample',
+                          url: sample,
+                          label: basenameOf(sample),
+                          isDicom: isDicomName(sample),
+                        }
+                  )
+                }
+                className={[
+                  'max-w-full truncate rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors',
+                  isSelected
+                    ? 'bg-sky-500/20 text-sky-200 ring-1 ring-inset ring-sky-400/40'
+                    : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300',
+                ].join(' ')}
+              >
+                {basenameOf(sample)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One breast slot: laterality toggle + CC + MLO inputs. */
+function BreastField({
+  index,
+  slot,
+  samples,
+  canRemove,
+  onLaterality,
+  onSource,
+  onRemove,
+}: {
+  index: number;
+  slot: BreastSlot;
+  samples: string[];
+  canRemove: boolean;
+  onLaterality: (index: number, laterality: Laterality) => void;
+  onSource: (index: number, view: 'cc' | 'mlo', source: ViewSource | null) => void;
+  onRemove: (index: number) => void;
+}) {
+  const { t } = useTranslation();
+  const sideLabel = slot.laterality === 'L' ? t('predict.left') : t('predict.right');
+  return (
+    <section className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            {t('predict.breast')}
+          </label>
+          {canRemove ? (
+            <div className="flex -space-x-px overflow-hidden rounded-md border border-slate-700">
+              {(['L', 'R'] as const).map((side) => (
+                <button
+                  key={side}
+                  type="button"
+                  onClick={() => onLaterality(index, side)}
+                  className={[
+                    'px-2 py-0.5 text-[11px] font-semibold transition-colors',
+                    slot.laterality === side
+                      ? 'bg-sky-500/20 text-sky-200'
+                      : 'bg-slate-900 text-slate-500 hover:text-slate-300',
+                  ].join(' ')}
+                >
+                  {side === 'L' ? 'L' : 'R'}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className="text-[11px] font-semibold text-slate-300">
+              {sideLabel}
+            </span>
+          )}
+          <span className="font-mono text-[10px] text-slate-600">
+            #{index + 1}
+          </span>
+        </div>
+        {canRemove ? (
+          <button
+            type="button"
+            onClick={() => onRemove(index)}
+            title={t('predict.removeBreast')}
+            className="inline-flex size-5 items-center justify-center rounded text-slate-500 transition-colors hover:text-rose-300"
+          >
+            <X className="size-3.5" />
+          </button>
+        ) : null}
+      </div>
+
+      <ViewInput
+        labelKey="predict.ccView"
+        samples={samples}
+        value={slot.cc}
+        onChange={(source) => onSource(index, 'cc', source)}
+      />
+      <ViewInput
+        labelKey="predict.mloView"
+        samples={samples}
+        value={slot.mlo}
+        onChange={(source) => onSource(index, 'mlo', source)}
+      />
+    </section>
   );
 }
 
 /** Everything the radiologist sign-off card needs to render and act. */
 export interface ApprovalState {
-  /** True when the scored image belongs to the review worklist. */
+  /** True when the scored breast belongs to the review worklist. */
   canApprove: boolean;
   isApproving: boolean;
   approvedImageId: string | null;
@@ -264,7 +455,121 @@ export interface ApprovalState {
   backHref: string | null;
 }
 
-/** Right-hand results column. */
+/** One breast's assessment card. */
+function BreastResultCard({
+  result,
+}: {
+  result: PredictBreastResult;
+}) {
+  const { t } = useTranslation();
+
+  if (!result.ok) {
+    return (
+      <section className="rounded-xl border border-rose-500/40 bg-rose-950/20 p-4">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-rose-300">
+          {t('predict.resultFor', {
+            side: result.laterality === 'L' ? t('predict.left') : t('predict.right'),
+          })}
+        </p>
+        <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-rose-200">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          {result.error ?? t('predict.failed')}
+        </p>
+      </section>
+    );
+  }
+
+  const top = CLASS_INFO[result.label] ?? CLASS_INFO[0];
+  const topClasses = toneClasses(top.tone);
+  const sideLabel =
+    result.laterality === 'L' ? t('predict.left') : t('predict.right');
+
+  return (
+    <section className="space-y-3 rounded-xl border border-slate-700/60 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          {t('predict.resultFor', { side: sideLabel })}
+        </h3>
+        <span className="rounded-full bg-slate-800 px-2 py-0.5 font-mono text-[10px] text-slate-400">
+          {result.laterality}
+        </span>
+      </div>
+
+      <div className={`rounded-xl border border-slate-700/40 p-4 ring-1 ring-inset ${topClasses.badge}`}>
+        <p className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
+          {t('predict.predictedAssessment')}
+        </p>
+        <p className="mt-1 text-2xl font-black leading-tight">
+          {t(top.labelKey)}
+        </p>
+        <p className="mt-0.5 font-mono text-xs opacity-90">
+          {result.biradsRange}
+        </p>
+        <p className="mt-2 text-[11px] opacity-90">
+          {t('predict.ensembleConfidence')}{' '}
+          <span className="font-mono">
+            {Math.round(result.confidence * 100)}%
+          </span>
+        </p>
+      </div>
+
+      <div className="space-y-2.5">
+        <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+          {t('predict.classProbabilities')}
+        </h2>
+        <ul className="space-y-2.5">
+          {CLASS_INFO.map((info, index) => (
+            <ProbabilityBar
+              key={info.key}
+              label={t(info.labelKey)}
+              range={info.range}
+              tone={info.tone}
+              value={result.probabilities[info.key]}
+              isTop={index === result.label}
+            />
+          ))}
+        </ul>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+          {t('predict.perFold', { count: result.folds.length })}
+        </h2>
+        <ul className="space-y-1">
+          {result.folds.map((fold) => (
+            <FoldRow
+              key={fold.fold}
+              fold={fold.fold}
+              label={fold.label}
+              probabilities={fold.probabilities}
+            />
+          ))}
+        </ul>
+        <p className="text-[10px] leading-relaxed text-slate-600">
+          {t('predict.perFoldNote')}
+        </p>
+      </div>
+
+      <div className="space-y-1 rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-[10px] leading-relaxed text-slate-500">
+        <p className="font-semibold text-slate-400">{t('predict.model')}</p>
+        <p className="font-mono">{result.model}</p>
+        <p className="font-mono">{result.modelVersion}</p>
+        <p className="pt-1">
+          {t('predict.inputLabel')}:{' '}
+          <span className="font-mono">
+            {result.input.fileCC} / {result.input.fileMLO}
+          </span>{' '}
+          · age {result.input.age} · density code {result.input.densityCode}
+        </p>
+        <p>
+          {t('predict.inference')}: {result.elapsedMs} ms
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** Right-hand results column: one card per breast + sign-off. */
 function ResultPanel({
   result,
   approval,
@@ -287,51 +592,16 @@ function ResultPanel({
     );
   }
 
-  const top = CLASS_INFO[result.label] ?? CLASS_INFO[0];
-  const topClasses = toneClasses(top.tone);
+  const first = result.breasts[0];
 
   return (
     <aside className="flex w-96 shrink-0 flex-col overflow-y-auto border-l border-slate-800 bg-slate-900/40">
       <div className="space-y-4 p-4">
-        <section
-          className={`rounded-xl border border-slate-700/60 p-4 ring-1 ring-inset ${topClasses.badge}`}
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
-            {t('predict.predictedAssessment')}
-          </p>
-          <p className="mt-1 text-2xl font-black leading-tight">
-            {t(top.labelKey)}
-          </p>
-          <p className="mt-0.5 font-mono text-xs opacity-90">
-            {result.biradsRange}
-          </p>
-          <p className="mt-2 text-[11px] opacity-90">
-            {t('predict.ensembleConfidence')}{' '}
-            <span className="font-mono">
-              {Math.round(result.confidence * 100)}%
-            </span>
-          </p>
-        </section>
+        {result.breasts.map((breast, index) => (
+          <BreastResultCard key={breast.laterality || index} result={breast} />
+        ))}
 
-        <section className="space-y-2.5">
-          <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            {t('predict.classProbabilities')}
-          </h2>
-          <ul className="space-y-2.5">
-            {CLASS_INFO.map((info, index) => (
-              <ProbabilityBar
-                key={info.key}
-                label={t(info.labelKey)}
-                range={info.range}
-                tone={info.tone}
-                value={result.probabilities[info.key]}
-                isTop={index === result.label}
-              />
-            ))}
-          </ul>
-        </section>
-
-        {approval.canApprove ? (
+        {approval.canApprove && first ? (
           <section className="space-y-2.5 rounded-xl border border-sky-500/30 bg-sky-500/[0.06] p-3">
             <h2 className="text-[11px] font-bold uppercase tracking-wider text-sky-300">
               {t('predict.signoffTitle')}
@@ -358,7 +628,7 @@ function ResultPanel({
             ) : (
               <>
                 <p className="text-[11px] leading-relaxed text-slate-400">
-                  {t('predict.signoffBody', { label: result.labelName })}
+                  {t('predict.signoffBody', { label: first.labelName })}
                 </p>
                 <Button
                   variant="success"
@@ -383,41 +653,6 @@ function ResultPanel({
           </section>
         ) : null}
 
-        <section className="space-y-2">
-          <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            {t('predict.perFold', { count: result.folds.length })}
-          </h2>
-          <ul className="space-y-1">
-            {result.folds.map((fold) => (
-              <FoldRow
-                key={fold.fold}
-                fold={fold.fold}
-                label={fold.label}
-                probabilities={fold.probabilities}
-              />
-            ))}
-          </ul>
-          <p className="text-[10px] leading-relaxed text-slate-600">
-            {t('predict.perFoldNote')}
-          </p>
-        </section>
-
-        <section className="space-y-1 rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-[10px] leading-relaxed text-slate-500">
-          <p className="font-semibold text-slate-400">{t('predict.model')}</p>
-          <p className="font-mono">{result.model}</p>
-          <p className="font-mono">{result.modelVersion}</p>
-          <p className="pt-1">
-            {t('predict.inputLabel')}:{' '}
-            <span className="font-mono">
-              {result.input.fileCC} / {result.input.fileMLO}
-            </span>{' '}
-            · age {result.input.age} · density code {result.input.densityCode}
-          </p>
-          <p>
-            {t('predict.inference')}: {result.elapsedMs} ms
-          </p>
-        </section>
-
         <p className="flex items-start gap-1.5 rounded-lg border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-[10px] leading-relaxed text-amber-200/90">
           <AlertTriangle className="mt-0.5 size-3 shrink-0" />
           {t('predict.disclaimer')}
@@ -427,13 +662,14 @@ function ResultPanel({
   );
 }
 
-/** Mode 1 workspace: pick an image, set clinical inputs, run the ensemble. */
+/** Mode 1 workspace: score one or both breasts (2 or 4 images). */
 export function PredictWorkbench() {
   const { t } = useTranslation();
   const [samples, setSamples] = useState<string[]>([]);
   const [workerNote, setWorkerNote] = useState<string | null>(null);
-  const [ccPath, setCcPath] = useState<string | null>(null);
-  const [mloPath, setMloPath] = useState<string | null>(null);
+  const [slots, setSlots] = useState<BreastSlot[]>(() => [
+    { laterality: 'R', cc: null, mlo: null },
+  ]);
   const [age, setAge] = useState('55');
   const [density, setDensity] = useState<DensityChoice>('C');
   const [isRunning, setIsRunning] = useState(false);
@@ -482,14 +718,30 @@ export function PredictWorkbench() {
     };
   }, [t]);
 
-  /* Deep link from review mode: /predict?sample=…&imageId=…&from=review */
+  /* Deep link from review mode: /predict?sample=…&mlo=…&laterality=…&imageId=…&from=review */
   useEffect(() => {
     if (initialisedRef.current) return;
     initialisedRef.current = true;
     void refreshSession();
     const sample = searchParams.get('sample');
     if (!sample) return;
-    setCcPath(sample);
+    const mlo = searchParams.get('mlo');
+    const lateralityRaw = searchParams.get('laterality');
+    const laterality: Laterality =
+      lateralityRaw?.toUpperCase() === 'L' ? 'L' : 'R';
+    const makeSource = (path: string): ViewSource => ({
+      kind: 'sample',
+      url: path,
+      label: basenameOf(path),
+      isDicom: isDicomName(path),
+    });
+    setSlots([
+      {
+        laterality,
+        cc: makeSource(sample),
+        mlo: mlo ? makeSource(mlo) : null,
+      },
+    ]);
     setDatasetImageId(
       searchParams.get('imageId') ?? basenameOf(sample) ?? null
     );
@@ -500,20 +752,63 @@ export function PredictWorkbench() {
   useEffect(() => {
     setApprovedImageId(null);
     setApproveError(null);
-  }, [ccPath, mloPath, result]);
+  }, [slots, result]);
 
-  const chooseView = useCallback(
-    (set: (next: string | null) => void, path: string) => {
-      set(path || null);
+  const setLaterality = useCallback(
+    (index: number, laterality: Laterality) => {
+      setSlots((prev) => {
+        const previous = prev[index]?.laterality;
+        const next = prev.map((slot, i) =>
+          i === index ? { ...slot, laterality } : slot
+        );
+        if (next.length === 2 && previous && next[0].laterality === next[1].laterality) {
+          const other = index === 0 ? 1 : 0;
+          next[other] = { ...next[other], laterality: previous };
+        }
+        return next;
+      });
       setResult(null);
       setError(null);
     },
     []
   );
 
+  const setSource = useCallback(
+    (index: number, view: 'cc' | 'mlo', source: ViewSource | null) => {
+      setSlots((prev) =>
+        prev.map((slot, i) => (i === index ? { ...slot, [view]: source } : slot))
+      );
+      setResult(null);
+      setError(null);
+    },
+    []
+  );
+
+  const addBreast = useCallback(() => {
+    setSlots((prev) => {
+      if (prev.length >= 2) return prev;
+      const laterality: Laterality = prev[0].laterality === 'L' ? 'R' : 'L';
+      return [...prev, { laterality, cc: null, mlo: null }];
+    });
+    setResult(null);
+  }, []);
+
+  const removeBreast = useCallback((index: number) => {
+    setSlots((prev) =>
+      prev.length === 2 && index === 1 ? [prev[0]] : prev
+    );
+    setResult(null);
+  }, []);
+
+  const readyBreasts = slots.filter((slot) => slot.cc && slot.mlo);
+
   const runPrediction = useCallback(async () => {
-    if (!ccPath || !mloPath) {
+    if (readyBreasts.length === 0) {
       setError(t('predict.missingView'));
+      return;
+    }
+    if (readyBreasts.some((slot) => !slot.cc || !slot.mlo)) {
+      setError(t('predict.perBreastMissing'));
       return;
     }
     const parsedAge = Number(age);
@@ -524,12 +819,34 @@ export function PredictWorkbench() {
     setIsRunning(true);
     setError(null);
     try {
-      const prediction = await predictSample(
-        ccPath,
-        mloPath,
-        parsedAge,
-        density
+      const anyFile = readyBreasts.some(
+        (slot) => slot.cc?.kind === 'file' || slot.mlo?.kind === 'file'
       );
+      let prediction: PredictResponse;
+      if (anyFile) {
+        const uploads = await Promise.all(
+          readyBreasts.map(async (slot) => ({
+            laterality: slot.laterality,
+            cc: await toFile(slot.cc!),
+            mlo: await toFile(slot.mlo!),
+          }))
+        );
+        prediction = await predictBreastsUpload(
+          parsedAge,
+          density,
+          uploads
+        );
+      } else {
+        prediction = await predictBreasts(
+          parsedAge,
+          density,
+          readyBreasts.map((slot) => ({
+            laterality: slot.laterality,
+            sampleCC: slot.cc!.url,
+            sampleMLO: slot.mlo!.url,
+          }))
+        );
+      }
       setResult(prediction);
     } catch (err) {
       setResult(null);
@@ -537,14 +854,15 @@ export function PredictWorkbench() {
     } finally {
       setIsRunning(false);
     }
-  }, [ccPath, mloPath, age, density, t]);
+  }, [readyBreasts, age, density, t]);
 
   /**
    * Radiologist sign-off: store the predicted label for a dataset image so the
    * worklist shows it as approved.
    */
   const approveLabel = useCallback(async () => {
-    if (!result || !ccPath || !mloPath || !datasetImageId) return;
+    const breast = result?.breasts[0];
+    if (!result || !breast || !datasetImageId) return;
     setIsApproving(true);
     setApproveError(null);
     try {
@@ -552,11 +870,11 @@ export function PredictWorkbench() {
         imageId: datasetImageId,
         radiologistId: reviewer?.id ?? 'UNKNOWN',
         originalLabel: 'Unlabeled',
-        finalLabel: result.labelName,
+        finalLabel: breast.labelName,
         status: 'APPROVED',
         notes:
-          `Label produced by the ensemble in /predict (${result.biradsRange}, ` +
-          `${Math.round(result.confidence * 100)}% confidence) and approved by the reviewer.`,
+          `Label produced by the ensemble in /predict (${breast.biradsRange}, ` +
+          `${Math.round(breast.confidence * 100)}% confidence) and approved by the reviewer.`,
         timestamp: new Date().toISOString(),
       };
       const response = await submitValidation(record);
@@ -571,21 +889,22 @@ export function PredictWorkbench() {
     } finally {
       setIsApproving(false);
     }
-  }, [result, ccPath, mloPath, datasetImageId, reviewer, t]);
+  }, [result, datasetImageId, reviewer, t]);
 
-  const ccFileName = ccPath ? basenameOf(ccPath) : '';
-  const previewUrl = ccPath;
+  const previewSource =
+    slots[0]?.cc ?? slots[0]?.mlo ?? slots[1]?.cc ?? slots[1]?.mlo ?? null;
   const previewCase = useMemo(
     () =>
-      previewUrl && ccFileName
-        ? previewCaseFor(previewUrl, ccFileName)
+      previewSource
+        ? previewCaseFor(previewSource.url, previewSource.label)
         : null,
-    [previewUrl, ccFileName]
+    [previewSource]
   );
+  const previewLabel = previewSource?.label ?? '';
 
   return (
     <div className="flex min-h-0 flex-1">
-      {/* ---------------- source + clinical inputs ---------------- */}
+      {/* ---------------- breast pickers + clinical inputs ---------------- */}
       <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-r border-slate-800 bg-slate-900/40">
         <div className="space-y-4 p-4">
           <section className="space-y-2">
@@ -593,52 +912,33 @@ export function PredictWorkbench() {
               1 · {t('predict.imageSection')}
             </h2>
 
-            <ViewPicker
-              labelKey="predict.ccView"
-              samples={samples}
-              value={ccPath}
-              onChange={(next) => chooseView(setCcPath, next)}
-            />
-            <ViewPicker
-              labelKey="predict.mloView"
-              samples={samples}
-              value={mloPath}
-              onChange={(next) => chooseView(setMloPath, next)}
-            />
+            {slots.map((slot, index) => (
+              <BreastField
+                key={index}
+                index={index}
+                slot={slot}
+                samples={samples}
+                canRemove={slots.length > 1}
+                onLaterality={setLaterality}
+                onSource={setSource}
+                onRemove={removeBreast}
+              />
+            ))}
+
+            {slots.length < 2 ? (
+              <button
+                type="button"
+                onClick={addBreast}
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 text-xs font-semibold text-slate-400 transition-colors hover:border-sky-500/60 hover:text-sky-200"
+              >
+                <Plus className="size-3.5" />
+                {t('predict.addBreast')}
+              </button>
+            ) : null}
 
             <p className="text-[10px] leading-relaxed text-slate-600">
               {t('predict.pairHint')}
             </p>
-
-            {samples.length > 0 ? (
-              <div className="space-y-1">
-                <p className="text-[10px] uppercase tracking-wider text-slate-600">
-                  {t('predict.bundledSamples')}
-                </p>
-                <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
-                  {samples.map((sample) => {
-                    const isSelected =
-                      ccPath === sample || mloPath === sample;
-                    return (
-                      <button
-                        key={sample}
-                        type="button"
-                        title={sample}
-                        onClick={() => chooseView(setCcPath, sample)}
-                        className={[
-                          'max-w-full truncate rounded-md px-2 py-1 font-mono text-[10px] transition-colors',
-                          isSelected
-                            ? 'bg-sky-500/20 text-sky-200 ring-1 ring-inset ring-sky-400/40'
-                            : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200',
-                        ].join(' ')}
-                      >
-                        {basenameOf(sample)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
           </section>
 
           <section className="space-y-3">
@@ -684,7 +984,7 @@ export function PredictWorkbench() {
               variant="primary"
               size="md"
               className="w-full"
-              disabled={!ccPath || !mloPath}
+              disabled={readyBreasts.length === 0}
               loading={isRunning}
               leftIcon={<Play className="size-4" />}
               onClick={() => void runPrediction()}
@@ -723,8 +1023,8 @@ export function PredictWorkbench() {
             caseStudy={previewCase}
             annotation={{
               badge: 'AI',
-              title: ccFileName,
-              subtitle: isDicomName(ccFileName)
+              title: previewLabel,
+              subtitle: isDicomName(previewLabel)
                 ? t('predict.annotationDicom')
                 : t('predict.annotationImage'),
             }}
@@ -745,7 +1045,7 @@ export function PredictWorkbench() {
       <ResultPanel
         result={result}
         approval={{
-          canApprove: Boolean(ccPath && mloPath),
+          canApprove: Boolean(cameFromReview && datasetImageId),
           isApproving,
           approvedImageId,
           error: approveError,
@@ -756,4 +1056,3 @@ export function PredictWorkbench() {
     </div>
   );
 }
-

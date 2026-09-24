@@ -1,9 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
-import { toErrorResponse } from '@/lib/app-error';
+import { AppError, toErrorResponse } from '@/lib/app-error';
 import { requireUser } from '@/lib/auth';
 
 /**
@@ -261,6 +262,46 @@ export async function GET(): Promise<NextResponse> {
   }
 }
 
+/** Acceptable multipart file roles: "<side>_<view>" with side in {l, r}. */
+const UPLOAD_ROLES = ['l_cc', 'l_mlo', 'r_cc', 'r_mlo'] as const;
+const IMAGE_SUFFIX = /\.(png|jpe?g|dcm|dicom)$/i;
+
+interface BreastPair {
+  laterality: string;
+  image_cc: string;
+  image_mlo: string;
+}
+
+function parseClinical(
+  ageValue: unknown,
+  densityValue: unknown
+): { age?: number; density?: string } {
+  const age =
+    typeof ageValue === 'number' ? ageValue : Number.parseFloat(String(ageValue ?? ''));
+  return {
+    age: Number.isFinite(age) && age > 0 && age <= 120 ? age : undefined,
+    density: String(densityValue ?? 'C').trim().toUpperCase(),
+  };
+}
+
+/** Write an uploaded file to the request temp folder (extension preserved). */
+async function saveUpload(
+  folder: string,
+  role: string,
+  upload: File
+): Promise<string> {
+  if (!IMAGE_SUFFIX.test(upload.name)) {
+    throw new AppError(
+      400,
+      `Unsupported file "${upload.name}". Use PNG, JPG or DICOM.`
+    );
+  }
+  const extension = path.extname(upload.name) || '.png';
+  const target = path.join(folder, `${role}${extension}`);
+  await writeFile(target, Buffer.from(await upload.arrayBuffer()));
+  return target;
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     await requireUser();
@@ -268,73 +309,115 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return toErrorResponse(error);
   }
   const contentType = request.headers.get('content-type') ?? '';
+  const isMultipart = contentType.includes('multipart/form-data');
 
-  if (contentType.includes('multipart/form-data')) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message:
-          'File upload is disabled. Select the CC and MLO views of the same breast from the bundled samples to run prediction.',
-      },
-      { status: 400 }
-    );
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message:
-          error instanceof Error
-            ? error.message
-            : 'Invalid JSON body. Send {samplePathCC, samplePathMLO, age, density}.',
-      },
-      { status: 400 }
-    );
-  }
-
-  const ccRaw = String(body.samplePathCC ?? '').trim();
-  const mloRaw = String(body.samplePathMLO ?? '').trim();
-  if (!ccRaw || !mloRaw) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: 'Both samplePathCC and samplePathMLO are required.',
-      },
-      { status: 400 }
-    );
-  }
-
-  let cc: string;
-  let mlo: string;
-  try {
-    cc = resolveSamplePath(ccRaw);
-    mlo = resolveSamplePath(mloRaw);
-  } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message:
-          error instanceof Error
-            ? error.message
-            : 'Both samplePathCC and samplePathMLO are required.',
-      },
-      { status: 400 }
-    );
-  }
-
-  const payload: Record<string, unknown> = {
-    image_cc: cc,
-    image_mlo: mlo,
-    age: body.age,
-    density: body.density,
-  };
+  let payload: Record<string, unknown> | null = null;
+  const foldersToClean: string[] = [];
 
   try {
-    const result = await worker().request(payload);
+    if (isMultipart) {
+      const form = await request.formData();
+      const folder = await mkdtemp(path.join(tmpdir(), 'mammo-predict-'));
+      foldersToClean.push(folder);
+
+      const saved = new Map<string, string>();
+      for (const role of UPLOAD_ROLES) {
+        const upload = form.get(role);
+        if (upload instanceof File && upload.size > 0) {
+          saved.set(role, await saveUpload(folder, role, upload));
+        }
+      }
+
+      const breasts: BreastPair[] = [];
+      for (const side of ['L', 'R'] as const) {
+        const prefix = side.toLowerCase();
+        const cc = saved.get(`${prefix}_cc`);
+        const mlo = saved.get(`${prefix}_mlo`);
+        if (cc && mlo) {
+          breasts.push({ laterality: side, image_cc: cc, image_mlo: mlo });
+        } else if (cc || mlo) {
+          throw new AppError(
+            400,
+            `Uploaded one view of breast ${side} but not the other: ${side === 'L' ? 'l_cc' : 'r_cc'} and ${side === 'L' ? 'l_mlo' : 'r_mlo'} are both required.`
+          );
+        }
+      }
+      if (breasts.length === 0) {
+        throw new AppError(
+          400,
+          'Upload at least one complete breast (CC + MLO). File roles: l_cc, l_mlo, r_cc, r_mlo.'
+        );
+      }
+
+      const clinical = parseClinical(form.get('age'), form.get('density'));
+      payload = { breasts };
+      if (clinical.age !== undefined) payload.age = clinical.age;
+      if (clinical.density) payload.density = clinical.density;
+    } else {
+      let body: Record<string, unknown>;
+      try {
+        body = (await request.json()) as Record<string, unknown>;
+      } catch {
+        throw new AppError(
+          400,
+          'Invalid JSON body. Send {age, density, breasts:[{laterality, sampleCC, sampleMLO}]}.'
+        );
+      }
+
+      const clinical = parseClinical(body.age, body.density);
+      const requested = Array.isArray(body.breasts)
+        ? (body.breasts as Record<string, unknown>[])
+        : null;
+
+      const breasts: BreastPair[] = [];
+      if (requested && requested.length > 0) {
+        if (requested.length > 2) {
+          throw new AppError(400, 'At most 2 breasts can be scored per request.');
+        }
+        for (const breast of requested) {
+          const laterality = String(breast.laterality ?? '').trim().toUpperCase();
+          if (laterality !== 'L' && laterality !== 'R') {
+            throw new AppError(
+              400,
+              'Each breast needs a valid laterality ("L" or "R").'
+            );
+          }
+          const ccRaw = String(breast.sampleCC ?? '').trim();
+          const mloRaw = String(breast.sampleMLO ?? '').trim();
+          if (!ccRaw || !mloRaw) {
+            throw new AppError(
+              400,
+              `Breast ${laterality} needs both sampleCC and sampleMLO.`
+            );
+          }
+          breasts.push({
+            laterality,
+            image_cc: resolveSamplePath(ccRaw),
+            image_mlo: resolveSamplePath(mloRaw),
+          });
+        }
+      } else {
+        const ccRaw = String(body.samplePathCC ?? '').trim();
+        const mloRaw = String(body.samplePathMLO ?? '').trim();
+        if (!ccRaw || !mloRaw) {
+          throw new AppError(
+            400,
+            'Both samplePathCC and samplePathMLO are required.'
+          );
+        }
+        breasts.push({
+          laterality: '',
+          image_cc: resolveSamplePath(ccRaw),
+          image_mlo: resolveSamplePath(mloRaw),
+        });
+      }
+
+      payload = { breasts };
+      if (clinical.age !== undefined) payload.age = clinical.age;
+      if (clinical.density !== undefined) payload.density = clinical.density;
+    }
+
+    const result = await worker().request(payload ?? {});
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, message: String(result.error ?? 'Prediction failed.') },
@@ -343,6 +426,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof AppError) {
+      return toErrorResponse(error);
+    }
     return NextResponse.json(
       {
         ok: false,
@@ -350,5 +436,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       },
       { status: 500 }
     );
+  } finally {
+    for (const folder of foldersToClean) {
+      await rm(folder, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 }

@@ -75,7 +75,7 @@ export function RelabelModal() {
       onClose={closeRelabel}
       title={
         <span className="flex items-center gap-2">
-          Relabel patient {active.patient.id}
+          Relabel {active.acquisition.laterality} breast
           <span className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
             {active.acquisition.laterality}-{active.acquisition.view}
           </span>
@@ -209,7 +209,7 @@ export function RelabelModal() {
         )}
 <p className="mt-1.5 text-[10px] text-slate-600">
           Tip: choose the category you would report — it overrides the AI
-          label for this patient's study (all views).
+          label for this breast's CC + MLO views.
         </p>
       </div>
 

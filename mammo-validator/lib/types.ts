@@ -328,9 +328,11 @@ export interface PredictInput {
   densityCode: number;
 }
 
-/** Response of ``POST /api/predict`` (produced by ``ml/predict.py``). */
-export interface PredictResponse {
+/** One breast's joint score: ``{laterality, label, ...}`` shape. */
+export interface PredictBreastResult {
   ok: boolean;
+  /** Breast side; empty when the caller did not tag it (legacy single pair). */
+  laterality: '' | Laterality;
   label: number;
   labelName: string;
   /** Collapsed BI-RADS range, e.g. "BI-RADS 4-5". */
@@ -342,6 +344,17 @@ export interface PredictResponse {
   modelVersion: string;
   input: PredictInput;
   elapsedMs: number;
+  /** Present on a per-breast failure (e.g. a missing image file). */
+  error?: string;
+}
+
+/** Response of ``POST /api/predict`` (produced by ``ml/predict.py``). */
+export interface PredictResponse {
+  ok: boolean;
+  /** One entry per breast scored (1 for a CC+MLO pair, 2 for both sides). */
+  breasts: PredictBreastResult[];
+  count: number;
+  message?: string;
 }
 
 /** Ensemble health reported by ``GET /api/predict``. */

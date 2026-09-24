@@ -282,17 +282,37 @@ export async function fetchPredictHealth(): Promise<PredictHealthResponse> {
   return readJson<PredictHealthResponse>(response);
 }
 
-/** Score a bundled CC + MLO breast pair (both must live under public/samples). */
-export async function predictSample(
-  ccPath: string,
-  mloPath: string,
+/** Score 1-2 breasts from bundled samples (JSON mode). */
+export async function predictBreasts(
   age: number,
-  density: DensityChoice
+  density: DensityChoice,
+  breasts: { laterality: 'L' | 'R'; sampleCC: string; sampleMLO: string }[]
 ): Promise<PredictResponse> {
   const response = await fetch(API_ENDPOINTS.predict, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ samplePathCC: ccPath, samplePathMLO: mloPath, age, density }),
+    body: JSON.stringify({ age, density, breasts }),
+  });
+  return readJson<PredictResponse>(response);
+}
+
+/** Score 1-2 breasts from uploaded files (multipart mode). */
+export async function predictBreastsUpload(
+  age: number,
+  density: DensityChoice,
+  breasts: { laterality: 'L' | 'R'; cc: File; mlo: File }[]
+): Promise<PredictResponse> {
+  const form = new FormData();
+  form.set('age', String(age));
+  form.set('density', density);
+  for (const breast of breasts) {
+    const prefix = breast.laterality.toLowerCase();
+    form.set(`${prefix}_cc`, breast.cc, breast.cc.name);
+    form.set(`${prefix}_mlo`, breast.mlo, breast.mlo.name);
+  }
+  const response = await fetch(API_ENDPOINTS.predict, {
+    method: 'POST',
+    body: form,
   });
   return readJson<PredictResponse>(response);
 }

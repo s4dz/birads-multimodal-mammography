@@ -1,22 +1,38 @@
 'use client';
 
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { Bot, Check, PenLine, ScanSearch } from 'lucide-react';
 import { Kbd } from '@/components/ui/Button';
 import { useTranslation } from '@/lib/i18n/LanguageProvider';
 import { ToneBadge } from '@/components/ui/Badge';
 import {
-  biradsDescriptor,
   classSummary,
   toneForClass,
   toneForLabel,
 } from '@/lib/taxonomy';
+import { fuseBreastLabel } from '@/lib/breast-fusion';
 import {
   selectActiveCase,
   selectDecisionFor,
   useWorkbenchStore,
 } from '@/store/workbench-store';
 import type { AiClassLabel, ValidationRecord } from '@/lib/types';
+
+/** Views of the breast containing the active image (stable array identity). */
+function useBreastViews() {
+  const cases = useWorkbenchStore((state) => state.cases);
+  const activeIndex = useWorkbenchStore((state) => state.activeIndex);
+  return useMemo(() => {
+    const active = cases[activeIndex];
+    if (!active) return [];
+    const pid = active.patient.id;
+    const side = active.acquisition.laterality;
+    return cases.filter(
+      (c) => c.patient.id === pid && c.acquisition.laterality === side
+    );
+  }, [cases, activeIndex]);
+}
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-GB', {
@@ -167,6 +183,8 @@ function DecisionSummary({
 export function ValidationPanel() {
   const { t } = useTranslation();
   const active = useWorkbenchStore(selectActiveCase);
+  const breastViews = useBreastViews();
+  const fused = useMemo(() => fuseBreastLabel(breastViews), [breastViews]);
   const decision = useWorkbenchStore((state) =>
     active ? selectDecisionFor(state, active.imageId) : undefined
   );
@@ -178,11 +196,23 @@ export function ValidationPanel() {
 
   if (!active) return null;
 
+  const sideLabel =
+    active.acquisition.laterality === 'L' ? 'Left breast' : 'Right breast';
+
   // Dataset images can reach the worklist without any AI label. Rather than
-  // showing a meaningless assessment, hand the image to /predict.
+  // showing a meaningless assessment, hand the whole breast to /predict with
+  // both views pre-selected so the user can score a per-breast label.
   if (active.needsPrediction) {
+    const partner =
+      breastViews.find((c) => c.imageId !== active.imageId) ?? null;
+    const ccSample =
+      active.acquisition.view === 'CC' ? active : (partner ?? active);
+    const mloSample =
+      active.acquisition.view === 'MLO' ? active : partner;
     const predictHref =
-      `/predict?sample=${encodeURIComponent(active.image.url)}` +
+      `/predict?sample=${encodeURIComponent(ccSample.image.url)}` +
+      `&mlo=${encodeURIComponent(mloSample?.image.url ?? '')}` +
+      `&laterality=${encodeURIComponent(active.acquisition.laterality)}` +
       `&imageId=${encodeURIComponent(active.imageId)}&from=review`;
 
     return (
@@ -199,7 +229,7 @@ export function ValidationPanel() {
               <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300 ring-1 ring-inset ring-amber-400/30">
                 {t('panel.unlabeled')}
               </span>
-              <p className="mt-2 text-sm font-semibold text-slate-200">
+              <p className="mt-3 text-sm font-semibold text-slate-200">
                 {t('panel.noLabelTitle')}
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
@@ -232,10 +262,20 @@ export function ValidationPanel() {
     );
   }
 
-  const descriptor = biradsDescriptor(active.ai.biradsGrade);
   const predictedClass = active.ai.predictedClass;
   const approved = decision?.status === 'APPROVED';
-  const aiPct = Math.round(active.ai.confidence * 100);
+
+  // Per-breast label: fused across this breast's CC + MLO (max rule). When the
+  // breast has a single view, the fusion falls back to that view's label.
+  const fusedLabel = fused;
+  const assessmentLabel: AiClassLabel =
+    fusedLabel ?? predictedClass;
+  const assessmentConfidence = fusedLabel
+    ? fusedLabel.confidence
+    : active.ai.confidence;
+  const assessmentProbabilities = fusedLabel
+    ? fusedLabel.probabilities
+    : active.ai.classProbabilities;
 
   const originalFinding = active.ai.findings.find(
     (finding) => finding.originalClass && finding.modelClass
@@ -256,53 +296,92 @@ export function ValidationPanel() {
               AI assessment
             </h2>
           </div>
-          <div className="rounded-xl border border-slate-700/70 bg-slate-900/80 p-3.5">
-            {originalFinding && originalClass ? (
-              <>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  {t('panel.originalDatasetLabel')}
-                </p>
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <ToneBadge
-                    tone={toneForClass(originalClass.index)}
-                    className="px-2 py-0.5 text-xs"
-                  >
-                    {originalLabel}
-                  </ToneBadge>
-                  {typeof originalFinding.originalConfidence === 'number' ? (
-                    <span className="shrink-0 font-mono text-[10px] text-slate-500">
-                      {t('panel.originalLabelConfidence')}{' '}
-                      {Math.round(originalFinding.originalConfidence * 100)}%
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mb-3 mt-3 border-t border-slate-800" />
-              </>
-            ) : null}
-            <div className="flex items-start justify-between gap-2">
-              <ToneBadge
-                tone={toneForClass(predictedClass.index)}
-                className="px-3.5 py-1.5 text-2xl"
-              >
-                {predictedClass.name}
-              </ToneBadge>
-            </div>
-            <p className="mt-1.5 text-[13px] font-medium text-slate-200">
-              {predictedClass.range}
-            </p>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-              {classSummary(predictedClass.index)}
-            </p>
+<div className="rounded-xl border border-slate-700/70 bg-slate-900/80 p-3.5">
+              {originalFinding && originalClass ? (
+                <>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    {t('panel.originalDatasetLabel')}
+                  </p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <ToneBadge
+                      tone={toneForClass(originalClass.index)}
+                      className="px-2 py-0.5 text-xs"
+                    >
+                      {originalLabel}
+                    </ToneBadge>
+                    {typeof originalFinding.originalConfidence === 'number' ? (
+                      <span className="shrink-0 font-mono text-[10px] text-slate-500">
+                        {t('panel.originalLabelConfidence')}{' '}
+                        {Math.round(originalFinding.originalConfidence * 100)}%
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mb-3 mt-3 border-t border-slate-800" />
+                </>
+              ) : null}
 
-            <div className="mt-3 space-y-2.5">
-              <ConfidenceMeter value={active.ai.confidence} />
-              <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  Alternative class probabilities
-                </p>
-                <ClassCandidates probabilities={active.ai.classProbabilities} />
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                <span className="rounded-full bg-sky-500/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-sky-300 ring-1 ring-inset ring-sky-400/30">
+                  {sideLabel}
+                </span>
+                <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                  {fusedLabel
+                    ? breastViews.length === 2
+                      ? 'fused CC + MLO'
+                      : 'single view'
+                    : 'per view'}
+                </span>
               </div>
-            </div>
+
+              <div className="flex items-start justify-between gap-2">
+                <ToneBadge
+                  tone={toneForClass(assessmentLabel.index)}
+                  className="px-3.5 py-1.5 text-2xl"
+                >
+                  {assessmentLabel.name}
+                </ToneBadge>
+              </div>
+              <p className="mt-1.5 text-[13px] font-medium text-slate-200">
+                {assessmentLabel.range}
+              </p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+                {classSummary(assessmentLabel.index)}
+              </p>
+
+              <div className="mt-3 space-y-2.5">
+                <ConfidenceMeter value={assessmentConfidence} />
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Alternative class probabilities
+                  </p>
+                  <ClassCandidates probabilities={assessmentProbabilities} />
+                </div>
+              </div>
+
+              {fusedLabel && breastViews.length > 1 ? (
+                <div className="mt-3 space-y-1 border-t border-slate-800 pt-2">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Per-view predictions
+                  </p>
+                  {fusedLabel.perView.map((view) => (
+                    <div
+                      key={view.view}
+                      className="flex items-center justify-between gap-2 rounded-md bg-white/[0.03] px-2 py-1 text-[11px]"
+                    >
+                      <span className="font-mono text-slate-500">
+                        {view.view}
+                      </span>
+                      <span className="text-slate-200">{view.name}</span>
+                      <span className="font-mono text-slate-400">
+                        {view.range}
+                      </span>
+                      <span className="font-mono text-slate-500">
+                        {Math.round(view.confidence * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
 
             <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-800 pt-2 text-[10px] text-slate-600">
               <span className="truncate">
@@ -415,32 +494,38 @@ export function ValidationPanel() {
             Radiologist decision
           </h2>
 
-          {/* AI suggestion (informational recap) */}
+          {/* AI suggestion (informational recap, per breast) */}
           <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
               AI suggestion
             </p>
             <div className="mt-1 flex items-baseline gap-2">
               <ToneBadge
-                tone={toneForClass(predictedClass.index)}
+                tone={toneForClass(assessmentLabel.index)}
                 className="px-2 py-0.5 text-xs"
               >
-                {predictedClass.name}
+                {assessmentLabel.name}
               </ToneBadge>
               <span className="min-w-0 truncate text-[11px] text-slate-400">
-                {predictedClass.range}
+                {assessmentLabel.range}
               </span>
               <span className="ml-auto shrink-0 font-mono text-[10px] text-slate-600">
-                {aiPct}% confidence
+                {Math.round(assessmentConfidence * 100)}% confidence
               </span>
             </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
+              {sideLabel}
+              {fusedLabel && breastViews.length > 1
+                ? ' · fused from CC + MLO (max rule)'
+                : ''}
+            </p>
           </div>
 
           <hr className="border-slate-800" />
 
           {/* Your decision */}
           {decision ? (
-            <DecisionSummary record={decision} prediction={predictedClass} />
+            <DecisionSummary record={decision} prediction={assessmentLabel} />
           ) : (
             <div className="rounded-lg border border-dashed border-slate-700/60 bg-slate-900/50 px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
@@ -473,8 +558,8 @@ export function ValidationPanel() {
                 : approved
                   ? 'Update decision'
                   : decision
-                    ? `Change to ${descriptor.label}`
-                    : `Approve ${descriptor.label}`}
+                    ? `Change to ${assessmentLabel.name}`
+                    : `Approve ${assessmentLabel.name}`}
               <Kbd>A</Kbd>
             </button>
 

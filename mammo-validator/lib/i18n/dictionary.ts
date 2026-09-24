@@ -158,8 +158,8 @@ const MESSAGES = {
   'predict.mloView': { en: 'MLO view', vi: 'Ảnh MLO' },
   'predict.chooseView': { en: 'Select…', vi: 'Chọn…' },
   'predict.pairHint': {
-    en: 'Pick the CC and MLO views of the same breast (same side) — the model fuses both into a single breast-level assessment.',
-    vi: 'Chọn ảnh CC và MLO của cùng một bên vú — mô hình sẽ gộp hai ảnh thành một kết quả đánh giá cho cả vú.',
+    en: 'Upload or pick the CC and MLO views of one breast (or of both breasts — 4 images). Each breast returns its own assessment, so the two sides may differ.',
+    vi: 'Tải lên hoặc chọn ảnh CC và MLO của một bên vú (hoặc cả hai vú — 4 ảnh). Mỗi bên vú trả về kết quả riêng, nên hai bên có thể khác nhau.',
   },
   'predict.missingView': {
     en: 'Choose both the CC and MLO views before running the model.',
@@ -202,13 +202,13 @@ const MESSAGES = {
 
   'predict.emptyTitle': { en: 'No image selected', vi: 'Chưa chọn ảnh' },
   'predict.emptyHint': {
-    en: 'Pick the CC and MLO views of the same breast from the bundled samples below.',
-    vi: 'Chọn ảnh CC và MLO cùng một bên vú từ các ảnh mẫu bên dưới.',
+    en: 'Upload or pick the CC and MLO views for each breast below, then run the model.',
+    vi: 'Tải lên hoặc chọn ảnh CC và MLO cho từng bên vú bên dưới, sau đó chạy mô hình.',
   },
   'predict.noResultTitle': { en: 'No prediction yet', vi: 'Chưa có kết quả' },
   'predict.noResultHint': {
-    en: 'Choose the CC + MLO pair of one breast, fill in the clinical inputs and run the model to see the joint BI-RADS assessment.',
-    vi: 'Chọn cặp ảnh CC + MLO của một bên vú, nhập thông tin lâm sàng và chạy mô hình để xem kết quả BI-RADS chung.',
+    en: 'Upload or pick the CC + MLO pair of one breast (or both breasts — 4 images), fill in the clinical inputs and run the model.',
+    vi: 'Tải lên hoặc chọn cặp ảnh CC + MLO của một bên vú (hoặc cả hai vú — 4 ảnh), nhập thông tin lâm sàng và chạy mô hình.',
   },
   'predict.predictedAssessment': { en: 'Predicted assessment', vi: 'Kết quả dự đoán' },
   'predict.ensembleConfidence': { en: 'Ensemble confidence', vi: 'Độ tin cậy tổ hợp' },
@@ -246,6 +246,20 @@ const MESSAGES = {
   'predict.classBenign': { en: 'Benign-leaning', vi: 'Nghiêng lành tính' },
   'predict.classSuspicious': { en: 'Suspicious', vi: 'Nghi ngờ' },
   'predict.inputLabel': { en: 'input', vi: 'đầu vào' },
+  'predict.breast': { en: 'Breast', vi: 'Vú' },
+  'predict.left': { en: 'Left breast', vi: 'Vú trái' },
+  'predict.right': { en: 'Right breast', vi: 'Vú phải' },
+  'predict.addBreast': {
+    en: 'Add second breast (4 images)',
+    vi: 'Thêm vú còn lại (4 ảnh)',
+  },
+  'predict.removeBreast': { en: 'Remove breast', vi: 'Bỏ vú này' },
+  'predict.uploadOrSample': { en: 'Upload or pick', vi: 'Tải lên hoặc chọn' },
+  'predict.resultFor': { en: 'Assessment · {side}', vi: 'Kết quả · {side}' },
+  'predict.perBreastMissing': {
+    en: 'Each included breast needs both a CC and an MLO image.',
+    vi: 'Mỗi bên vú được chọn cần đủ cả ảnh CC và ảnh MLO.',
+  },
   'predict.disclaimer': {
     en: 'Research model trained on VinDr-Mammo. Output is a 3-class collapse (BI-RADS 1 / 2-3 / 4-5) and must not be used for diagnosis.',
     vi: 'Mô hình nghiên cứu huấn luyện trên VinDr-Mammo. Kết quả gộp 3 lớp (BI-RADS 1 / 2-3 / 4-5) và không được dùng để chẩn đoán.',
