@@ -60,7 +60,11 @@ export function LoginForm() {
     setSubmitting(true);
     try {
       const user = await login(username.trim(), password);
-      router.replace(
+      // Full page navigation: protected routes that were prefetched while
+      // signed out keep a stale client-side redirect in Next's prefetch
+      // cache, so `router.replace` would land us back on /login despite a
+      // valid cookie. A top-level navigation re-runs the proxy and works.
+      window.location.assign(
         next || (user.role === 'admin' ? '/admin' : '/review')
       );
     } catch (err) {
