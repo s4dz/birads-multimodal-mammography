@@ -24,7 +24,7 @@ const MESSAGES = {
   /* ---------------- top bar ---------------- */
   'nav.predict': { en: 'Predict', vi: 'Dự đoán' },
   'nav.predictHint': {
-    en: 'Score a single PNG or DICOM mammogram with the model',
+    en: 'Score one breast (CC + MLO pair) with the model',
     vi: 'Chạy mô hình trên một ảnh nhũ ảnh PNG hoặc DICOM',
   },
   'nav.review': { en: 'Review dataset', vi: 'Duyệt dữ liệu' },
@@ -153,7 +153,18 @@ const MESSAGES = {
   },
 
   /* ---------------- predict mode ---------------- */
-  'predict.imageSection': { en: '1 · Mammogram', vi: '1 · Ảnh nhũ ảnh' },
+  'predict.imageSection': { en: 'Mammogram', vi: 'Nhũ ảnh' },
+  'predict.ccView': { en: 'CC view', vi: 'Ảnh CC' },
+  'predict.mloView': { en: 'MLO view', vi: 'Ảnh MLO' },
+  'predict.chooseView': { en: 'Select…', vi: 'Chọn…' },
+  'predict.pairHint': {
+    en: 'Pick the CC and MLO views of the same breast (same side) — the model fuses both into a single breast-level assessment.',
+    vi: 'Chọn ảnh CC và MLO của cùng một bên vú — mô hình sẽ gộp hai ảnh thành một kết quả đánh giá cho cả vú.',
+  },
+  'predict.missingView': {
+    en: 'Choose both the CC and MLO views before running the model.',
+    vi: 'Cần chọn cả ảnh CC và ảnh MLO trước khi chạy mô hình.',
+  },
   'predict.dropHint': { en: 'Drop a PNG or DICOM here', vi: 'Kéo thả ảnh PNG hoặc DICOM vào đây' },
   'predict.browse': { en: 'Browse file', vi: 'Chọn tệp' },
   'predict.bundledSamples': { en: 'or a bundled sample', vi: 'hoặc ảnh mẫu có sẵn' },
@@ -191,13 +202,13 @@ const MESSAGES = {
 
   'predict.emptyTitle': { en: 'No image selected', vi: 'Chưa chọn ảnh' },
   'predict.emptyHint': {
-    en: 'Upload a PNG/JPG or DICOM mammogram — or pick a bundled sample — to score it with the model.',
-    vi: 'Tải lên ảnh PNG/JPG hoặc DICOM — hoặc chọn ảnh mẫu — để mô hình dự đoán.',
+    en: 'Pick the CC and MLO views of the same breast from the bundled samples below.',
+    vi: 'Chọn ảnh CC và MLO cùng một bên vú từ các ảnh mẫu bên dưới.',
   },
   'predict.noResultTitle': { en: 'No prediction yet', vi: 'Chưa có kết quả' },
   'predict.noResultHint': {
-    en: 'Choose a PNG or DICOM mammogram, fill in the clinical inputs and run the model to see its BI-RADS assessment.',
-    vi: 'Chọn ảnh PNG hoặc DICOM, nhập thông tin lâm sàng và chạy mô hình để xem kết quả BI-RADS.',
+    en: 'Choose the CC + MLO pair of one breast, fill in the clinical inputs and run the model to see the joint BI-RADS assessment.',
+    vi: 'Chọn cặp ảnh CC + MLO của một bên vú, nhập thông tin lâm sàng và chạy mô hình để xem kết quả BI-RADS chung.',
   },
   'predict.predictedAssessment': { en: 'Predicted assessment', vi: 'Kết quả dự đoán' },
   'predict.ensembleConfidence': { en: 'Ensemble confidence', vi: 'Độ tin cậy tổ hợp' },

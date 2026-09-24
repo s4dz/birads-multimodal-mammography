@@ -10,7 +10,6 @@ import {
   ImageIcon,
   LoaderCircle,
   Play,
-  Upload,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -18,7 +17,6 @@ import { ImageViewer } from '@/components/viewer/ImageViewer';
 import {
   fetchPredictHealth,
   predictSample,
-  predictUpload,
   submitValidation,
 } from '@/lib/api-client';
 import { toneClasses } from '@/lib/taxonomy';
@@ -36,10 +34,12 @@ import type {
 /**
  * Mode 1 — Predict.
  *
- * Score a single PNG or DICOM mammogram with the 4-fold SwinV2 + CatBoost
- * ensemble (`/api/predict` -> `ml/predict.py`). The image is previewed with the
- * same viewer used in review mode, so pan / zoom / brightness / contrast work
- * identically while you inspect the finding.
+ * Score one breast by feeding its CC + MLO pair to the 4-fold SwinV2 +
+ * breast-fusion + CatBoost ensemble (`/api/predict` -> `ml/predict.py`),
+ * which returns a single joint BI-RADS assessment for the breast. The CC
+ * image is previewed with the same viewer used in review mode, so
+ * pan / zoom / brightness / contrast work identically while you inspect the
+ * finding.
  */
 
 /** The three classes the model was trained on (BI-RADS collapsed). */
@@ -76,21 +76,12 @@ const DENSITY_OPTIONS: { value: DensityChoice; labelKey: TranslationKey }[] = [
   { value: 'D', labelKey: 'predict.densityD' },
 ];
 
-const ACCEPTED_TYPES = '.png,.jpg,.jpeg,.dcm,.dicom';
-
-type PredictionSource =
-  | { kind: 'sample'; path: string }
-  | { kind: 'upload'; file: File }
-  | null;
-
 function isDicomName(name: string): boolean {
   return /\.(dcm|dicom)$/i.test(name);
 }
 
-function fileNameOf(source: PredictionSource): string {
-  if (!source) return '';
-  if (source.kind === 'upload') return source.file.name;
-  return source.path.split('/').pop() ?? source.path;
+function basenameOf(path: string): string {
+  return path.split('/').pop() ?? path;
 }
 
 /** Minimal StudyCase so the prediction image gets the full viewer controls. */
@@ -214,6 +205,50 @@ function FoldRow({
         {CLASS_INFO[label] ? t(CLASS_INFO[label].labelKey) : '—'}
       </span>
     </li>
+  );
+}
+
+/** Dropdown selecting a bundled sample for one view (CC or MLO). */
+function ViewPicker({
+  labelKey,
+  samples,
+  value,
+  onChange,
+}: {
+  labelKey: TranslationKey;
+  samples: string[];
+  value: string | null;
+  onChange: (next: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs text-slate-400">{t(labelKey)}</span>
+      <div className="flex items-center gap-1">
+        <select
+          value={value ?? ''}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200 focus:border-sky-500 focus:outline-none"
+        >
+          <option value="">{t('predict.chooseView')}</option>
+          {samples.map((sample) => (
+            <option key={sample} value={sample} title={sample}>
+              {basenameOf(sample)}
+            </option>
+          ))}
+        </select>
+        {value ? (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            title={t('predict.clearSelection')}
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded text-slate-500 transition-colors hover:text-slate-200"
+          >
+            <X className="size-3.5" />
+          </button>
+        ) : null}
+      </div>
+    </label>
   );
 }
 
@@ -373,8 +408,10 @@ function ResultPanel({
           <p className="font-mono">{result.modelVersion}</p>
           <p className="pt-1">
             {t('predict.inputLabel')}:{' '}
-            <span className="font-mono">{result.input.file}</span> · age{' '}
-            {result.input.age} · density code {result.input.densityCode}
+            <span className="font-mono">
+              {result.input.fileCC} / {result.input.fileMLO}
+            </span>{' '}
+            · age {result.input.age} · density code {result.input.densityCode}
           </p>
           <p>
             {t('predict.inference')}: {result.elapsedMs} ms
@@ -395,14 +432,13 @@ export function PredictWorkbench() {
   const { t } = useTranslation();
   const [samples, setSamples] = useState<string[]>([]);
   const [workerNote, setWorkerNote] = useState<string | null>(null);
-  const [source, setSource] = useState<PredictionSource>(null);
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [ccPath, setCcPath] = useState<string | null>(null);
+  const [mloPath, setMloPath] = useState<string | null>(null);
   const [age, setAge] = useState('55');
   const [density, setDensity] = useState<DensityChoice>('C');
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
 
   /* Radiologist sign-off (dataset images only) */
   const [datasetImageId, setDatasetImageId] = useState<string | null>(null);
@@ -415,8 +451,6 @@ export function PredictWorkbench() {
   const reviewer = useWorkbenchStore((state) => state.reviewer);
   const refreshSession = useWorkbenchStore((state) => state.refreshSession);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
   const initialisedRef = useRef(false);
 
   /* Warm the Python worker and fetch the bundled sample list on first paint. */
@@ -455,9 +489,9 @@ export function PredictWorkbench() {
     void refreshSession();
     const sample = searchParams.get('sample');
     if (!sample) return;
-    setSource({ kind: 'sample', path: sample });
+    setCcPath(sample);
     setDatasetImageId(
-      searchParams.get('imageId') ?? sample.split('/').pop() ?? null
+      searchParams.get('imageId') ?? basenameOf(sample) ?? null
     );
     setCameFromReview(searchParams.get('from') === 'review');
   }, [refreshSession, searchParams]);
@@ -466,66 +500,22 @@ export function PredictWorkbench() {
   useEffect(() => {
     setApprovedImageId(null);
     setApproveError(null);
-  }, [source, result]);
+  }, [ccPath, mloPath, result]);
 
-  /* Release the preview blob URL on unmount. */
-  useEffect(
-    () => () => {
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+  const chooseView = useCallback(
+    (set: (next: string | null) => void, path: string) => {
+      set(path || null);
+      setResult(null);
+      setError(null);
     },
     []
   );
 
-  const releaseObjectUrl = useCallback(() => {
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
-  }, []);
-
-  const acceptFile = useCallback(
-    (file: File) => {
-      releaseObjectUrl();
-      const url = URL.createObjectURL(file);
-      objectUrlRef.current = url;
-      setObjectUrl(url);
-      setSource({ kind: 'upload', file });
-      setResult(null);
-      setError(null);
-    },
-    [releaseObjectUrl]
-  );
-
-  const selectSample = useCallback(
-    (path: string) => {
-      releaseObjectUrl();
-      setObjectUrl(null);
-      setSource({ kind: 'sample', path });
-      setResult(null);
-      setError(null);
-    },
-    [releaseObjectUrl]
-  );
-
-  const clearSource = useCallback(() => {
-    releaseObjectUrl();
-    setObjectUrl(null);
-    setSource(null);
-    setResult(null);
-    setError(null);
-  }, [releaseObjectUrl]);
-
-  const fileName = fileNameOf(source);
-  const previewUrl =
-    source?.kind === 'upload' ? objectUrl : (source?.path ?? null);
-  const previewCase = useMemo(
-    () =>
-      previewUrl && fileName ? previewCaseFor(previewUrl, fileName) : null,
-    [previewUrl, fileName]
-  );
-
   const runPrediction = useCallback(async () => {
-    if (!source) return;
+    if (!ccPath || !mloPath) {
+      setError(t('predict.missingView'));
+      return;
+    }
     const parsedAge = Number(age);
     if (!Number.isFinite(parsedAge) || parsedAge <= 0 || parsedAge > 120) {
       setError(t('predict.ageError'));
@@ -534,10 +524,12 @@ export function PredictWorkbench() {
     setIsRunning(true);
     setError(null);
     try {
-      const prediction =
-        source.kind === 'upload'
-          ? await predictUpload(source.file, parsedAge, density)
-          : await predictSample(source.path, parsedAge, density);
+      const prediction = await predictSample(
+        ccPath,
+        mloPath,
+        parsedAge,
+        density
+      );
       setResult(prediction);
     } catch (err) {
       setResult(null);
@@ -545,14 +537,14 @@ export function PredictWorkbench() {
     } finally {
       setIsRunning(false);
     }
-  }, [source, age, density]);
+  }, [ccPath, mloPath, age, density, t]);
 
   /**
    * Radiologist sign-off: store the predicted label for a dataset image so the
    * worklist shows it as approved.
    */
   const approveLabel = useCallback(async () => {
-    if (!result || source?.kind !== 'sample' || !datasetImageId) return;
+    if (!result || !ccPath || !mloPath || !datasetImageId) return;
     setIsApproving(true);
     setApproveError(null);
     try {
@@ -579,16 +571,16 @@ export function PredictWorkbench() {
     } finally {
       setIsApproving(false);
     }
-  }, [result, source, datasetImageId, reviewer, t]);
+  }, [result, ccPath, mloPath, datasetImageId, reviewer, t]);
 
-  const onDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      setIsDragging(false);
-      const file = event.dataTransfer.files?.[0];
-      if (file) acceptFile(file);
-    },
-    [acceptFile]
+  const ccFileName = ccPath ? basenameOf(ccPath) : '';
+  const previewUrl = ccPath;
+  const previewCase = useMemo(
+    () =>
+      previewUrl && ccFileName
+        ? previewCaseFor(previewUrl, ccFileName)
+        : null,
+    [previewUrl, ccFileName]
   );
 
   return (
@@ -601,64 +593,22 @@ export function PredictWorkbench() {
               1 · {t('predict.imageSection')}
             </h2>
 
-            <div
-              onDragOver={(event) => {
-                event.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={onDrop}
-              className={[
-                'rounded-xl border-2 border-dashed p-4 text-center transition-colors',
-                isDragging
-                  ? 'border-sky-400/70 bg-sky-500/10'
-                  : 'border-slate-700 bg-slate-950/40',
-              ].join(' ')}
-            >
-              <Upload className="mx-auto size-6 text-slate-500" />
-              <p className="mt-2 text-xs text-slate-400">
-                {t('predict.dropHint')}
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="mt-2"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {t('predict.browse')}
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={ACCEPTED_TYPES}
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) acceptFile(file);
-                  event.target.value = '';
-                }}
-              />
-            </div>
+            <ViewPicker
+              labelKey="predict.ccView"
+              samples={samples}
+              value={ccPath}
+              onChange={(next) => chooseView(setCcPath, next)}
+            />
+            <ViewPicker
+              labelKey="predict.mloView"
+              samples={samples}
+              value={mloPath}
+              onChange={(next) => chooseView(setMloPath, next)}
+            />
 
-            {source ? (
-              <div className="flex items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-950/50 px-2.5 py-2">
-                <ImageIcon className="size-4 shrink-0 text-sky-300" />
-                <span
-                  className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-300"
-                  title={fileName}
-                >
-                  {fileName}
-                </span>
-                <button
-                  type="button"
-                  onClick={clearSource}
-                  title={t('predict.clearSelection')}
-                  className="inline-flex size-5 shrink-0 items-center justify-center rounded text-slate-500 transition-colors hover:text-slate-200"
-                >
-                  <X className="size-3.5" />
-                </button>
-              </div>
-            ) : null}
+            <p className="text-[10px] leading-relaxed text-slate-600">
+              {t('predict.pairHint')}
+            </p>
 
             {samples.length > 0 ? (
               <div className="space-y-1">
@@ -668,13 +618,13 @@ export function PredictWorkbench() {
                 <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
                   {samples.map((sample) => {
                     const isSelected =
-                      source?.kind === 'sample' && source.path === sample;
+                      ccPath === sample || mloPath === sample;
                     return (
                       <button
                         key={sample}
                         type="button"
                         title={sample}
-                        onClick={() => selectSample(sample)}
+                        onClick={() => chooseView(setCcPath, sample)}
                         className={[
                           'max-w-full truncate rounded-md px-2 py-1 font-mono text-[10px] transition-colors',
                           isSelected
@@ -682,7 +632,7 @@ export function PredictWorkbench() {
                             : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200',
                         ].join(' ')}
                       >
-                        {sample.split('/').pop()}
+                        {basenameOf(sample)}
                       </button>
                     );
                   })}
@@ -734,7 +684,7 @@ export function PredictWorkbench() {
               variant="primary"
               size="md"
               className="w-full"
-              disabled={!source}
+              disabled={!ccPath || !mloPath}
               loading={isRunning}
               leftIcon={<Play className="size-4" />}
               onClick={() => void runPrediction()}
@@ -773,8 +723,8 @@ export function PredictWorkbench() {
             caseStudy={previewCase}
             annotation={{
               badge: 'AI',
-              title: fileName,
-              subtitle: isDicomName(fileName)
+              title: ccFileName,
+              subtitle: isDicomName(ccFileName)
                 ? t('predict.annotationDicom')
                 : t('predict.annotationImage'),
             }}
@@ -795,7 +745,7 @@ export function PredictWorkbench() {
       <ResultPanel
         result={result}
         approval={{
-          canApprove: source?.kind === 'sample',
+          canApprove: Boolean(ccPath && mloPath),
           isApproving,
           approvedImageId,
           error: approveError,

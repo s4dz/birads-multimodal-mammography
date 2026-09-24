@@ -1,12 +1,17 @@
 """Mammography AI model — architecture ported from ``bestone_v3_cv_oof.ipynb``.
 
 This is the **exact** network used to produce the checkpoints in ``models/``:
-``UnifiedMultimodalNetwork`` = SwinV2-Tiny image backbone + FT-Transformer style
-tabular embedding + cross-attention fusion, followed (outside the network) by a
-CatBoost classifier trained on a selected subset of the 256-d latent vector.
+``BreastMultiviewNetwork`` = SwinV2-Tiny image backbone (shared by the CC and
+MLO views) + FT-Transformer style tabular embedding + cross-attention fusion +
+``BreastFusionHead`` that merges the two view latents into one breast-level
+latent, followed (outside the network) by a CatBoost classifier trained on a
+selected subset of the 256-d latent vector.
 
 Every class below is a 1:1 port of the notebook so the saved ``state_dict``
-loads without surprises. Inference-only concerns (no_grad, no unfreezing, no
+loads without surprises (0 missing / 0 unexpected). The single-view
+``UnifiedMultimodalNetwork`` is kept as-is for reference; the deployed
+checkpoints carry the ``breast_fusion.*`` keys and require the per-breast
+``BreastMultiviewNetwork``. Inference-only concerns (no_grad, no unfreezing, no
 pretrained downloads) are the only deviations.
 
 The training notebook's 3-class collapse is preserved:
@@ -319,3 +324,109 @@ class UnifiedMultimodalNetwork(nn.Module):
         """The 256-d representation consumed by the CatBoost stage."""
         _, latent_vector, _ = self.forward(img, x_cat, x_cont)
         return latent_vector
+
+
+# ---------------------------------------------------------------------------
+# Per-breast multiview network (notebook CELL 10 — trained artifact)
+# ---------------------------------------------------------------------------
+#
+# The fold checkpoints under ``models/`` were trained as a *per-breast*
+# network: one breast = the CC + MLO pair of the same side, fused by
+# ``BreastFusionHead`` into a single breast-level latent before the linear
+# head.  The deployed weights carry the ``breast_fusion.*`` keys, so loading
+# them into a single-view ``UnifiedMultimodalNetwork`` silently drops 16
+# parameters.  ``BreastMultiviewNetwork`` restores the exact trained
+# topology and state-dict contract (0 missing / 0 unexpected).
+
+
+class BreastFusionHead(nn.Module):
+    """Fuse the two view latents (CC=0, MLO=1) of one breast into one latent."""
+
+    def __init__(
+        self,
+        embed_dim: int = 256,
+        num_heads: int = 8,
+        num_layers: int = 1,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        # Learned positional embedding for the 2 views: 0=CC, 1=MLO
+        self.view_pos = nn.Embedding(2, embed_dim)
+        # CLS token pooling: attends over both views
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+
+        layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=embed_dim * 4,
+            dropout=dropout,
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(self, view_latents: torch.Tensor) -> torch.Tensor:
+        """view_latents [B, 2, embed_dim] -> breast_latent [B, embed_dim]."""
+        B, n_views, _ = view_latents.shape
+        pos = self.view_pos(
+            torch.arange(n_views, device=view_latents.device)
+        )  # [2, D]
+        seq = view_latents + pos.unsqueeze(0)  # [B, 2, D]
+
+        cls = self.cls_token.expand(B, 1, -1)  # [B, 1, D]
+        seq = torch.cat([cls, seq], dim=1)  # [B, 3, D]
+
+        out = self.encoder(seq)
+        return self.norm(out[:, 0])  # CLS pooled -> [B, embed_dim]
+
+
+class BreastMultiviewNetwork(nn.Module):
+    """SwinV2 (shared) + tabular + cross-attention + breast fusion + head.
+
+    Per-breast multiview model: the CC and MLO views of the same breast go
+    through a shared encoder, then ``BreastFusionHead`` merges the two view
+    latents into one breast-level latent consumed by the linear head (and,
+    downstream, the CatBoost stage).
+    """
+
+    def __init__(
+        self,
+        cat_cardinalities: list[int] | None = None,
+        num_continuous: int = VINDR_NUM_CONTINUOUS,
+        embed_dim: int = 256,
+        num_classes: int = NUM_CLASSES,
+    ):
+        super().__init__()
+        if cat_cardinalities is None:
+            cat_cardinalities = list(VINDR_CAT_CARDINALITIES)
+        self.img_branch = SpatialPreservingSwinBackbone()
+        self.tab_branch = TabularFTTransformerEmbedding(
+            cat_cardinalities, num_continuous, embed_dim
+        )
+        self.fusion_core = IntermediateCrossAttentionFusion(
+            img_channels=SWIN_OUT_CHANNELS, embed_dim=embed_dim
+        )
+        self.breast_fusion = BreastFusionHead(embed_dim=embed_dim)
+        self.classifier_head = nn.Linear(embed_dim, num_classes)
+
+    def forward(
+        self,
+        cc_img: torch.Tensor,
+        mlo_img: torch.Tensor,
+        x_cat: torch.Tensor,
+        x_cont: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        cc_feats = self.img_branch(cc_img)
+        mlo_feats = self.img_branch(mlo_img)
+        tab_tokens = self.tab_branch(x_cat, x_cont)
+
+        cc_latent, _ = self.fusion_core(cc_feats, tab_tokens)  # [B, D]
+        mlo_latent, _ = self.fusion_core(mlo_feats, tab_tokens)  # [B, D]
+
+        view_latents = torch.stack([cc_latent, mlo_latent], dim=1)  # [B, 2, D]
+        breast_latent = self.breast_fusion(view_latents)  # [B, D]
+
+        logits = self.classifier_head(breast_latent)
+        return logits, breast_latent, view_latents

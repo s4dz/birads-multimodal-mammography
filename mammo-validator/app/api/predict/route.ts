@@ -1,7 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { toErrorResponse } from '@/lib/app-error';
@@ -26,7 +25,7 @@ export const maxDuration = 300;
 /* Python worker                                                       */
 /* ------------------------------------------------------------------ */
 
-const PENDING_LINE_TIMEOUT_MS = 240_000; // model load + 4-fold CPU inference
+const PENDING_LINE_TIMEOUT_MS = 65_000; // per-request Python call (warm worker)
 const STACK_TRACE_TAIL = 4_000;
 
 type WorkerResponse = Record<string, unknown> & { ok: boolean; error?: string };
@@ -196,9 +195,6 @@ function worker(): PredictWorker {
 /* Samples + routes                                                    */
 /* ------------------------------------------------------------------ */
 
-const ALLOWED_UPLOAD_EXT = new Set(['.png', '.jpg', '.jpeg', '.dcm', '.dicom']);
-const MAX_UPLOAD_BYTES = 60 * 1024 * 1024; // mammograms are large
-
 function samplesRoot(): string {
   return path.join(process.cwd(), 'public', 'samples');
 }
@@ -237,38 +233,6 @@ async function listSamples(): Promise<string[]> {
   return collected;
 }
 
-/** Persist an uploaded PNG/DICOM so the Python process can read it. */
-async function storeUpload(
-  request: NextRequest
-): Promise<Record<string, unknown>> {
-  const form = await request.formData();
-  const file = form.get('file');
-  if (!(file instanceof File)) throw new Error('No file was uploaded.');
-
-  const extension = path.extname(file.name).toLowerCase();
-  if (!ALLOWED_UPLOAD_EXT.has(extension)) {
-    throw new Error(
-      `Unsupported file type "${extension || file.name}". Use PNG, JPG or DICOM.`
-    );
-  }
-  if (file.size > MAX_UPLOAD_BYTES) {
-    throw new Error('File is larger than 60 MB.');
-  }
-
-  const uploadDir = path.join(os.tmpdir(), 'mammo-predict');
-  await mkdir(uploadDir, { recursive: true });
-  const safeName = file.name.replace(/[^\w.-]/g, '_');
-  const target = path.join(uploadDir, `${Date.now()}_${safeName}`);
-  await writeFile(target, Buffer.from(await file.arrayBuffer()));
-
-  return {
-    image: target,
-    age: form.get('age') ?? undefined,
-    density: form.get('density') ?? undefined,
-    cleanup: target,
-  };
-}
-
 /** GET -> worker/model health plus a few bundled samples for the picker. */
 export async function GET(): Promise<NextResponse> {
   try {
@@ -304,28 +268,70 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return toErrorResponse(error);
   }
   const contentType = request.headers.get('content-type') ?? '';
-  let payload: Record<string, unknown>;
 
-  try {
-    if (contentType.includes('multipart/form-data')) {
-      payload = await storeUpload(request);
-    } else {
-      const body = (await request.json()) as Record<string, unknown>;
-      payload = {
-        image: resolveSamplePath(String(body.samplePath ?? '')),
-        age: body.age,
-        density: body.density,
-      };
-    }
-  } catch (error) {
+  if (contentType.includes('multipart/form-data')) {
     return NextResponse.json(
       {
         ok: false,
-        message: error instanceof Error ? error.message : 'Bad request.',
+        message:
+          'File upload is disabled. Select the CC and MLO views of the same breast from the bundled samples to run prediction.',
       },
       { status: 400 }
     );
   }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Invalid JSON body. Send {samplePathCC, samplePathMLO, age, density}.',
+      },
+      { status: 400 }
+    );
+  }
+
+  const ccRaw = String(body.samplePathCC ?? '').trim();
+  const mloRaw = String(body.samplePathMLO ?? '').trim();
+  if (!ccRaw || !mloRaw) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: 'Both samplePathCC and samplePathMLO are required.',
+      },
+      { status: 400 }
+    );
+  }
+
+  let cc: string;
+  let mlo: string;
+  try {
+    cc = resolveSamplePath(ccRaw);
+    mlo = resolveSamplePath(mloRaw);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Both samplePathCC and samplePathMLO are required.',
+      },
+      { status: 400 }
+    );
+  }
+
+  const payload: Record<string, unknown> = {
+    image_cc: cc,
+    image_mlo: mlo,
+    age: body.age,
+    density: body.density,
+  };
 
   try {
     const result = await worker().request(payload);
@@ -340,15 +346,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(
       {
         ok: false,
-        message:
-          error instanceof Error ? error.message : 'Prediction failed.',
+        message: error instanceof Error ? error.message : 'Prediction failed.',
       },
       { status: 500 }
     );
-  } finally {
-    const cleanup = payload.cleanup;
-    if (typeof cleanup === 'string') {
-      await rm(cleanup, { force: true }).catch(() => undefined);
-    }
   }
 }

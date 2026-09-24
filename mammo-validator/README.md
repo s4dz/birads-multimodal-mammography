@@ -16,7 +16,7 @@ Zustand**, and **Cornerstone3D v5** for native DICOM rendering.
 
 | Mode | Purpose |
 | --- | --- |
-| **Predict** | Drop a single PNG/JPG or DICOM mammogram (or pick a bundled sample), enter the patient's age and breast density, and get the model's BI-RADS assessment with class probabilities and a per-fold breakdown. |
+| **Predict** | Pick the CC + MLO pair of the same breast from the bundled samples, enter the patient's age and breast density, and get the model's joint BI-RADS assessment with class probabilities and a per-fold breakdown. |
 | **Review dataset** | The radiologist worklist: browse patients and their views, then **approve** or **relabel** each AI prediction; decisions are POSTed to `/api/validation`. |
 
 Switch modes with the tabs in the top bar. Predict mode runs the real 4-fold
@@ -262,6 +262,9 @@ Predict mode runs the **actual trained model** — no mock predictions.
 - `SwinV2-Tiny` (`swinv2_tiny_window16_256` via timm, `features_only`) image backbone at 1024×1024
 - FT-Transformer style embedding of the tabular inputs (breast density + age)
 - Cross-attention fusion — tabular tokens query the image tokens → 256-d latent vector
+- **Breast fusion** (`BreastFusionHead`): the CC and MLO latents of the same
+  breast are pooled through a learned-view transformer (CLS) into one
+  breast-level latent — a breast is scored once, not per image
 - A `CatBoost` head per fold, trained on a **selected subset** of that latent vector
 
 **Preprocessing** (`MammographyTransform`): grayscale → resize 1024×1024 (INTER_CUBIC)
@@ -274,7 +277,7 @@ MONOCHROME1 is inverted.
 
 | File | Contents |
 | --- | --- |
-| `fold_{0..3}_pytorch.pth` | `model_state_dict`, `selected_feature_indices`, `embed_dim`, `num_classes`, `seed` |
+| `fold_{0..3}_pytorch.pth` | `model_state_dict` (incl. `breast_fusion.*`), `selected_feature_indices`, `embed_dim`, `num_classes`, `seed` |
 | `fold_{0..3}_catboost.cbm` | CatBoost head for that fold |
 
 The reported label is the **mean of the four folds**; fold disagreement is
@@ -285,13 +288,14 @@ expected near decision boundaries.
 ```bash
 pip install -r ml/requirements.txt     # torch, timm, catboost, opencv, pydicom
 python ml/predict.py --describe        # fold / checkpoint health check
-python ml/predict.py mammo.png --age 55 --density C
-python ml/predict.py mammo.dcm --age 62 --density B
+python ml/predict.py cc.png mlo.png --age 55 --density C
 python ml/predict.py --serve           # JSON-line worker used by /api/predict
 ```
 
-`/api/predict` spawns the worker once and keeps it warm (loading the four folds
-costs ~10 s; inference adds ~10 s on CPU). Useful overrides:
+A request needs **both views of one breast** (`{"image_cc", "image_mlo", "age",
+"density"}`); a single image is rejected. `/api/predict` spawns the worker once
+and keeps it warm (loading the four folds costs ~10 s; a breast pair adds ~10 s
+of CPU inference). Useful overrides:
 
 | Env var | Meaning |
 | --- | --- |

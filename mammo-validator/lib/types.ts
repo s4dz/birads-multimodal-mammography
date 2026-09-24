@@ -320,7 +320,10 @@ export interface PredictFoldResult {
 }
 
 export interface PredictInput {
-  file: string;
+  /** Scan file name of the CC view. */
+  fileCC: string;
+  /** Scan file name of the MLO view. */
+  fileMLO: string;
   age: number;
   densityCode: number;
 }

@@ -282,33 +282,17 @@ export async function fetchPredictHealth(): Promise<PredictHealthResponse> {
   return readJson<PredictHealthResponse>(response);
 }
 
-/** Score a bundled sample image (must live under public/samples). */
+/** Score a bundled CC + MLO breast pair (both must live under public/samples). */
 export async function predictSample(
-  samplePath: string,
+  ccPath: string,
+  mloPath: string,
   age: number,
   density: DensityChoice
 ): Promise<PredictResponse> {
   const response = await fetch(API_ENDPOINTS.predict, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ samplePath, age, density }),
-  });
-  return readJson<PredictResponse>(response);
-}
-
-/** Score an uploaded PNG/JPG or DICOM file. */
-export async function predictUpload(
-  file: File,
-  age: number,
-  density: DensityChoice
-): Promise<PredictResponse> {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('age', String(age));
-  form.append('density', density);
-  const response = await fetch(API_ENDPOINTS.predict, {
-    method: 'POST',
-    body: form,
+    body: JSON.stringify({ samplePathCC: ccPath, samplePathMLO: mloPath, age, density }),
   });
   return readJson<PredictResponse>(response);
 }

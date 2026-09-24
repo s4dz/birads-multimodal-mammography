@@ -1,8 +1,8 @@
 """Mammography label prediction — CLI and JSON-line server.
 
-Loads the 4-fold ensemble from ``models/`` (PyTorch multimodal network +
-CatBoost head per fold) and predicts the 3-class label for one PNG or DICOM
-mammogram.
+Loads the 4-fold ensemble from ``models/`` (PyTorch per-breast multiview
+network + CatBoost head per fold) and predicts the 3-class label for one
+breast given its CC + MLO pair.
 
 Class collapse (exactly as trained in ``bestone_v3_cv_oof.ipynb``):
     0 -> Normal         (BI-RADS 1)
@@ -10,13 +10,13 @@ Class collapse (exactly as trained in ``bestone_v3_cv_oof.ipynb``):
     2 -> Suspicious     (BI-RADS 4-5)
 
 Usage:
-    python ml/predict.py <image> [--age 55] [--density C] [--models-dir PATH]
+    python ml/predict.py <cc_image> <mlo_image> [--age 55] [--density C] [--models-dir PATH]
     python ml/predict.py --serve        # newline-delimited JSON on stdin/stdout
 
 ``--serve`` keeps every fold resident in memory so the Next.js API can reuse a
 single process instead of paying the model-load cost on every request.
 
-Request line  : {"image": "<abs path>", "age": 55, "density": "C"}
+Request line  : {"image_cc": "<abs path>", "image_mlo": "<abs path>", "age": 55, "density": "C"}
 Response line : {"ok": true, "label": 2, ...} or {"ok": false, "error": "..."}
 """
 
@@ -35,13 +35,13 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from model import (  # noqa: E402
+    BreastMultiviewNetwork,
     CLASS_NAMES_3,
     DEFAULT_DENSITY_CODE,
     DENSITY_CHOICES,
     DENSITY_MAPPING,
     NUM_CLASSES,
     MammographyTransform,
-    UnifiedMultimodalNetwork,
 )
 
 MODEL_NAME = "SwinV2 + FT-Transformer + Cross-Attention + CatBoost"
@@ -111,7 +111,7 @@ class Predictor:
             checkpoint = torch.load(
                 checkpoint_path, map_location="cpu", weights_only=False
             )
-            network = UnifiedMultimodalNetwork(
+            network = BreastMultiviewNetwork(
                 embed_dim=int(checkpoint.get("embed_dim", 256)),
                 num_classes=int(checkpoint.get("num_classes", NUM_CLASSES)),
             )
@@ -162,22 +162,28 @@ class Predictor:
 
     def predict(
         self,
-        image_path: Path | str,
+        cc_path: Path | str,
+        mlo_path: Path | str,
         age: float = DEFAULT_AGE,
         density: object = None,
     ) -> dict:
-        """Score one mammogram and return the ensembled 3-class prediction."""
+        """Score the CC + MLO pair of one breast and return the joint label."""
         if not self.folds:
             raise RuntimeError("No fold models are loaded.")
 
-        path = Path(image_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Image not found: {path}")
+        cc = Path(cc_path)
+        mlo = Path(mlo_path)
+        missing = [p.name for p in (cc, mlo) if not p.exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"Image(s) not found: {', '.join(missing)}"
+            )
 
         code = density_code_for(density)
         started = time.perf_counter()
 
-        tensor = self.transform(path).unsqueeze(0)  # [1, 1, H, W]
+        cc_tensor = self.transform(cc).unsqueeze(0)  # [1, 1, H, W]
+        mlo_tensor = self.transform(mlo).unsqueeze(0)  # [1, 1, H, W]
         x_cat = torch.tensor([[code]], dtype=torch.long)
         x_cont = torch.tensor([[float(age)]], dtype=torch.float32)
 
@@ -185,7 +191,9 @@ class Predictor:
         probability_rows: list[np.ndarray] = []
         with torch.no_grad():
             for fold in self.folds:
-                _, latent_vector, _ = fold["network"](tensor, x_cat, x_cont)
+                _, latent_vector, _ = fold["network"](
+                    cc_tensor, mlo_tensor, x_cat, x_cont
+                )
                 features = latent_vector.cpu().numpy()[:, fold["selected"]]
                 probs = np.asarray(fold["classifier"].predict_proba(features))[0]
                 probability_rows.append(probs)
@@ -214,7 +222,12 @@ class Predictor:
             "folds": per_fold,
             "model": MODEL_NAME,
             "modelVersion": MODEL_VERSION,
-            "input": {"file": path.name, "age": float(age), "densityCode": code},
+            "input": {
+                "fileCC": cc.name,
+                "fileMLO": mlo.name,
+                "age": float(age),
+                "densityCode": code,
+            },
             "elapsedMs": round((time.perf_counter() - started) * 1000),
         }
 
@@ -222,8 +235,19 @@ class Predictor:
 def _handle_request(predictor: Predictor, payload: dict) -> dict:
     """Never raises — errors travel back to the caller as JSON."""
     try:
+        cc_path = payload.get("image_cc") or ""
+        mlo_path = payload.get("image_mlo") or ""
+        if not cc_path or not mlo_path:
+            return {
+                "ok": False,
+                "error": (
+                    "Both image_cc and image_mlo are required "
+                    "(per-breast inference over the CC + MLO pair)."
+                ),
+            }
         return predictor.predict(
-            payload.get("image", ""),
+            cc_path,
+            mlo_path,
             age=float(payload.get("age", DEFAULT_AGE)),
             density=payload.get("density"),
         )
@@ -235,7 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Mammography label prediction (SwinV2 + CatBoost ensemble)"
     )
-    parser.add_argument("image", nargs="?", help="PNG/JPG or DICOM file to score")
+    parser.add_argument("cc_image", nargs="?", help="CC PNG/JPG or DICOM to score")
+    parser.add_argument("mlo_image", nargs="?", help="MLO PNG/JPG or DICOM to score")
     parser.add_argument("--age", type=float, default=DEFAULT_AGE)
     parser.add_argument("--density", default="C", help="A | B | C | D")
     parser.add_argument("--models-dir", default=str(DEFAULT_MODELS_DIR))
@@ -277,12 +302,20 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.flush()
         return 0
 
-    if not args.image:
-        parser.error("an image path is required (or use --serve / --describe)")
+    if not args.cc_image or not args.mlo_image:
+        parser.error(
+            "a CC image and an MLO image are required "
+            "(per-breast inference over the CC + MLO pair)"
+        )
 
     result = _handle_request(
         predictor,
-        {"image": args.image, "age": args.age, "density": args.density},
+        {
+            "image_cc": args.cc_image,
+            "image_mlo": args.mlo_image,
+            "age": args.age,
+            "density": args.density,
+        },
     )
     print(json.dumps(result, indent=2))
     return 0 if result.get("ok") else 1

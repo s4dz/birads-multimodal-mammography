@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { PredictWorkbench } from '@/components/predict/PredictWorkbench';
 
 /**
- * `/predict` — score one PNG or DICOM mammogram with the model ensemble.
+ * `/predict` — score one breast (CC + MLO pair) with the model ensemble.
  * `useSearchParams` (used to accept `?sample=` deep links from review mode)
  * requires a Suspense boundary.
  */
