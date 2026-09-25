@@ -181,6 +181,22 @@ export function countCases(): number {
   return Number(row?.n ?? 0);
 }
 
+/**
+ * Rewrite the stored payload and needs-prediction flag of one case. Used when
+ * a reviewed / predicted label is persisted so the worklist reflects it.
+ */
+export function updateCasePayload(
+  imageId: string,
+  study: StudyCase,
+  needsPrediction: boolean
+): void {
+  getDb()
+    .prepare(
+      `UPDATE cases SET payload_json = ?, needs_prediction = ? WHERE image_id = ?`
+    )
+    .run(JSON.stringify(study), needsPrediction ? 1 : 0, imageId);
+}
+
 export function getCaseStudy(imageId: string): StudyCase | null {
   const row = getDb()
     .prepare(`SELECT payload_json FROM cases WHERE image_id = ?`)

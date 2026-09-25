@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   CheckCircle2,
+  Database,
   FileScan,
   ImageIcon,
   LoaderCircle,
@@ -17,10 +18,11 @@ import {
 import { Button } from '@/components/ui/Button';
 import { ImageViewer } from '@/components/viewer/ImageViewer';
 import {
+  fetchPredictHealth,
   predictBreasts,
   predictBreastsUpload,
-  submitValidation,
-  fetchPredictHealth,
+  saveCaseLabel,
+  uploadCases,
 } from '@/lib/api-client';
 import { toneClasses } from '@/lib/taxonomy';
 import { useTranslation } from '@/lib/i18n/LanguageProvider';
@@ -33,7 +35,7 @@ import type {
   PredictResponse,
   StudyCase,
   Tone,
-  ValidationRecord,
+  UploadedCaseInfo,
 } from '@/lib/types';
 
 /**
@@ -453,6 +455,12 @@ export interface ApprovalState {
   onApprove: () => void;
   /** "Back to review" target, when the user arrived from review mode. */
   backHref: string | null;
+  /** "Save to dataset" (admin, freshly uploaded files after a run). */
+  canSave: boolean;
+  isSaving: boolean;
+  savedCount: number;
+  saveError: string | null;
+  onSave: () => void;
 }
 
 /** One breast's assessment card. */
@@ -653,6 +661,48 @@ function ResultPanel({
           </section>
         ) : null}
 
+        {approval.canSave ? (
+          <section className="space-y-2.5 rounded-xl border border-teal-500/30 bg-teal-500/[0.06] p-3">
+            <h2 className="text-[11px] font-bold uppercase tracking-wider text-teal-300">
+              {t('predict.saveToDataset')}
+            </h2>
+            {approval.savedCount > 0 ? (
+              <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-emerald-200">
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  {t('predict.saveToDatasetDone', {
+                    count: approval.savedCount,
+                  })}
+                </span>
+              </p>
+            ) : (
+              <>
+                <p className="text-[11px] leading-relaxed text-slate-400">
+                  {t('predict.saveToDatasetBody')}
+                </p>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  className="w-full"
+                  loading={approval.isSaving}
+                  leftIcon={<Database className="size-4" />}
+                  onClick={approval.onSave}
+                >
+                  {approval.isSaving
+                    ? t('common.saving')
+                    : t('predict.saveToDatasetAction')}
+                </Button>
+              </>
+            )}
+            {approval.saveError ? (
+              <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-rose-300">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                {approval.saveError}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
         <p className="flex items-start gap-1.5 rounded-lg border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-[10px] leading-relaxed text-amber-200/90">
           <AlertTriangle className="mt-0.5 size-3 shrink-0" />
           {t('predict.disclaimer')}
@@ -678,10 +728,16 @@ export function PredictWorkbench() {
 
   /* Radiologist sign-off (dataset images only) */
   const [datasetImageId, setDatasetImageId] = useState<string | null>(null);
+  const [partnerImageId, setPartnerImageId] = useState<string | null>(null);
   const [cameFromReview, setCameFromReview] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [approvedImageId, setApprovedImageId] = useState<string | null>(null);
   const [approveError, setApproveError] = useState<string | null>(null);
+
+  /* Admin "save the uploaded images into the dataset" flow. */
+  const [savedCases, setSavedCases] = useState<UploadedCaseInfo[]>([]);
+  const [isSavingToDataset, setIsSavingToDataset] = useState(false);
+  const [saveDatasetError, setSaveDatasetError] = useState<string | null>(null);
 
   const searchParams = useSearchParams();
   const reviewer = useWorkbenchStore((state) => state.reviewer);
@@ -745,6 +801,7 @@ export function PredictWorkbench() {
     setDatasetImageId(
       searchParams.get('imageId') ?? basenameOf(sample) ?? null
     );
+    setPartnerImageId(searchParams.get('partnerId'));
     setCameFromReview(searchParams.get('from') === 'review');
   }, [refreshSession, searchParams]);
 
@@ -752,6 +809,8 @@ export function PredictWorkbench() {
   useEffect(() => {
     setApprovedImageId(null);
     setApproveError(null);
+    setSavedCases([]);
+    setSaveDatasetError(null);
   }, [slots, result]);
 
   const setLaterality = useCallback(
@@ -857,8 +916,10 @@ export function PredictWorkbench() {
   }, [readyBreasts, age, density, t]);
 
   /**
-   * Radiologist sign-off: store the predicted label for a dataset image so the
-   * worklist shows it as approved.
+   * Sign the predicted label off onto the dataset case (and its per-breast
+   * partner view): the label + joint probabilities are persisted into the
+   * case's `ai` and a decision row is recorded for audit. Works for admins
+   * (any case) and radiologists assigned to the case.
    */
   const approveLabel = useCallback(async () => {
     const breast = result?.breasts[0];
@@ -866,20 +927,17 @@ export function PredictWorkbench() {
     setIsApproving(true);
     setApproveError(null);
     try {
-      const record: ValidationRecord = {
-        imageId: datasetImageId,
-        radiologistId: reviewer?.id ?? 'UNKNOWN',
-        originalLabel: 'Unlabeled',
-        finalLabel: breast.labelName,
+      const response = await saveCaseLabel(datasetImageId, {
         status: 'APPROVED',
+        finalLabel: breast.labelName,
+        classProbabilities: breast.probabilities,
+        partnerImageId: partnerImageId ?? undefined,
         notes:
           `Label produced by the ensemble in /predict (${breast.biradsRange}, ` +
           `${Math.round(breast.confidence * 100)}% confidence) and approved by the reviewer.`,
-        timestamp: new Date().toISOString(),
-      };
-      const response = await submitValidation(record);
+      });
       if (!response.ok) {
-        throw new Error(response.message ?? t('predict.failed'));
+        throw new Error(t('predict.saveFailed'));
       }
       setApprovedImageId(datasetImageId);
     } catch (err) {
@@ -889,7 +947,48 @@ export function PredictWorkbench() {
     } finally {
       setIsApproving(false);
     }
-  }, [result, datasetImageId, reviewer, t]);
+  }, [result, datasetImageId, partnerImageId, t]);
+
+  /**
+   * Admin helper: persist the freshly-uploaded files as unlabeled dataset
+   * cases (CC + MLO per breast) so they enter the review queue. The images are
+   * stored without a label — the reviewer predicts and approves it later.
+   */
+  const saveToDataset = useCallback(async () => {
+    if (!result || readyBreasts.length === 0) return;
+    setIsSavingToDataset(true);
+    setSaveDatasetError(null);
+    try {
+      const uploads = await Promise.all(
+        readyBreasts.map(async (slot) => ({
+          laterality: slot.laterality,
+          cc: await toFile(slot.cc!),
+          mlo: await toFile(slot.mlo!),
+        }))
+      );
+      const parsedAge = Number(age);
+      const response = await uploadCases({
+        patient: {
+          sex: 'F',
+          age:
+            Number.isFinite(parsedAge) && parsedAge > 0 && parsedAge <= 120
+              ? parsedAge
+              : undefined,
+        },
+        breasts: uploads,
+      });
+      if (!response.ok) {
+        throw new Error(t('predict.saveFailed'));
+      }
+      setSavedCases(response.cases);
+    } catch (err) {
+      setSaveDatasetError(
+        err instanceof Error ? err.message : t('predict.saveFailed')
+      );
+    } finally {
+      setIsSavingToDataset(false);
+    }
+  }, [result, readyBreasts, age, t]);
 
   const previewSource =
     slots[0]?.cc ?? slots[0]?.mlo ?? slots[1]?.cc ?? slots[1]?.mlo ?? null;
@@ -1051,6 +1150,19 @@ export function PredictWorkbench() {
           error: approveError,
           onApprove: () => void approveLabel(),
           backHref: cameFromReview ? '/review' : null,
+          canSave: Boolean(
+            !cameFromReview &&
+              result?.ok &&
+              reviewer?.role === 'admin' &&
+              readyBreasts.length > 0 &&
+              readyBreasts.every(
+                (slot) => slot.cc?.kind === 'file' && slot.mlo?.kind === 'file'
+              )
+          ),
+          isSaving: isSavingToDataset,
+          savedCount: savedCases.length,
+          saveError: saveDatasetError,
+          onSave: () => void saveToDataset(),
         }}
       />
     </div>

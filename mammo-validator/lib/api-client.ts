@@ -6,12 +6,16 @@ import type {
   BulkAssignmentRequest,
   BulkAssignmentResponse,
   CaseFinalization,
+  CaseLabelPayload,
+  CaseLabelResponse,
   CaseReview,
   DensityChoice,
+  Laterality,
   PredictHealthResponse,
   PredictResponse,
   RadiologistWorkload,
   StudyCase,
+  UploadCasesResponse,
   UserRole,
   ValidationApiResponse,
   ValidationRecord,
@@ -242,6 +246,43 @@ export async function fetchCases(): Promise<StudyCase[]> {
   });
   const payload = await readJson<{ cases: StudyCase[] }>(response);
   return payload.cases;
+}
+
+/** POST /api/cases/:imageId/label -> persist a reviewed label on a case. */
+export async function saveCaseLabel(
+  imageId: string,
+  payload: CaseLabelPayload
+): Promise<CaseLabelResponse> {
+  const response = await fetch(
+    `${API_ENDPOINTS.cases}/${encodeURIComponent(imageId)}/label`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  return readJson<CaseLabelResponse>(response);
+}
+
+/** POST /api/cases/upload (admin) -> store new CC+MLO pairs as unlabeled cases. */
+export async function uploadCases(input: {
+  patient?: { id?: string; sex?: 'F' | 'M'; age?: number };
+  breasts: { laterality: Laterality; cc: File; mlo: File }[];
+}): Promise<UploadCasesResponse> {
+  const form = new FormData();
+  if (input.patient?.id) form.set('patient_id', input.patient.id);
+  if (input.patient?.sex) form.set('patient_sex', input.patient.sex);
+  if (input.patient?.age) form.set('patient_age', String(input.patient.age));
+  for (const breast of input.breasts) {
+    const prefix = breast.laterality.toLowerCase();
+    form.set(`${prefix}_cc`, breast.cc, breast.cc.name);
+    form.set(`${prefix}_mlo`, breast.mlo, breast.mlo.name);
+  }
+  const response = await fetch(API_ENDPOINTS.caseUpload, {
+    method: 'POST',
+    body: form,
+  });
+  return readJson<UploadCasesResponse>(response);
 }
 
 /** POST /api/validation -> persist an APPROVED / RELABELED decision. */

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Inbox, RefreshCw, TriangleAlert } from 'lucide-react';
+import { AlertTriangle, Database, Inbox, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/LanguageProvider';
 import { useValidationShortcuts } from '@/hooks/useValidationShortcuts';
 import { PatientHeader } from '@/components/header/PatientHeader';
@@ -9,6 +9,7 @@ import { QueueRail } from '@/components/queue/QueueRail';
 import { ImageViewer } from '@/components/viewer/ImageViewer';
 import { ValidationPanel } from '@/components/panel/ValidationPanel';
 import { RelabelModal } from '@/components/relabel/RelabelModal';
+import { UploadModal } from '@/components/upload/UploadModal';
 import { LoginRequired } from '@/components/auth/LoginRequired';
 import { ShortcutFooter } from '@/components/layout/ShortcutFooter';
 import { Notice, SyncProgressStrip } from '@/components/layout/Notice';
@@ -76,6 +77,7 @@ export function Workbench() {
   const hydrateDecisions = useWorkbenchStore((state) => state.hydrateDecisions);
 
   const [ready, setReady] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   useEffect(() => {
     void refreshSession().finally(() => setReady(true));
@@ -117,6 +119,19 @@ export function Workbench() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950 text-slate-200 antialiased">
       <PatientHeader />
+
+      {reviewer.role === 'admin' ? (
+        <div className="flex shrink-0 items-center justify-end gap-2 border-b border-slate-800 bg-slate-900/40 px-4 py-1.5">
+          <button
+            type="button"
+            onClick={() => setUploadOpen(true)}
+            className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-3 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-700"
+          >
+            <Database className="size-3.5" />
+            {t('upload.openButton')}
+          </button>
+        </div>
+      ) : null}
 
       {unlabeledPending.length > 0 ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-500/25 bg-amber-500/[0.07] px-4 py-1.5 text-[11px] text-amber-200">
@@ -173,6 +188,11 @@ export function Workbench() {
       <ShortcutFooter />
 
       <RelabelModal />
+      <UploadModal
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        onDone={() => void loadCases()}
+      />
       <Notice />
     </div>
   );

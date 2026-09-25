@@ -199,6 +199,7 @@ export const useWorkbenchStore = create<WorkbenchState>()(
           id: user.id,
           name: user.name,
           specialty: user.specialty,
+          role: user.role,
         };
         set({ reviewer: profile, sessionState: 'authed' });
       } catch {

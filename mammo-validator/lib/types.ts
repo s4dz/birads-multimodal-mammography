@@ -132,7 +132,17 @@ export interface AiPrediction {
   modelVersion: string;
   /** ISO-8601 timestamp of the inference run. */
   runAt: string;
+  /**
+   * Where the label currently stored on this case came from. Bundled dataset
+   * samples are plain model output (`model`); a label persisted from a live
+   * predict of an unlabeled image is `live-predict`; an approved/relabelled
+   * review writes `review`. Absent = legacy model output.
+   */
+  labelSource?: AiLabelSource;
 }
+
+/** Origin of the label currently stored on a case. */
+export type AiLabelSource = 'model' | 'live-predict' | 'review';
 
 export interface AcquisitionInfo {
   laterality: Laterality;
@@ -374,4 +384,40 @@ export interface PredictHealthResponse {
   worker?: PredictWorkerInfo;
   samples?: string[];
   message?: string;
+}
+
+/** Payload for `POST /api/cases/:imageId/label` — sign a label onto a case. */
+export interface CaseLabelPayload {
+  status: ValidationStatus;
+  /** Label agreed by the reviewer (e.g. a model class name or BI-RADS string). */
+  finalLabel: string;
+  notes?: string;
+  /** Joint breast probabilities from a live predict run (persisted into `ai`). */
+  classProbabilities?: PredictProbabilities;
+  /** The other view of the same breast; labelled together when provided. */
+  partnerImageId?: string;
+}
+
+/** One case created by `POST /api/cases/upload`. */
+export interface UploadedCaseInfo {
+  imageId: string;
+  url: string;
+  view: MammogramView;
+  laterality: Laterality;
+}
+
+/** Response of `POST /api/cases/upload`. */
+export interface UploadCasesResponse {
+  ok: boolean;
+  cases: UploadedCaseInfo[];
+  /** image ids already present in the dataset; skipped, not overwritten. */
+  duplicates: string[];
+  count: number;
+}
+
+/** Response of `POST /api/cases/:imageId/label`. */
+export interface CaseLabelResponse {
+  ok: boolean;
+  records: ValidationRecord[];
+  persistedCount: number;
 }

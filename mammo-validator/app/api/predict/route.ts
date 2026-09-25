@@ -200,19 +200,33 @@ function samplesRoot(): string {
   return path.join(process.cwd(), 'public', 'samples');
 }
 
-/** Resolve a client-supplied sample path, refusing anything outside public/samples. */
-function resolveSamplePath(relative: string): string {
-  const root = path.resolve(samplesRoot());
-  // Accept "/samples/png/x.png" (public URL) or "/png/x.png" (relative form).
+function uploadsRoot(): string {
+  return path.join(process.cwd(), 'public', 'uploads');
+}
+
+/**
+ * Resolve a client-supplied image path to disk, refusing anything outside the
+ * two image roots. Accepts public URLs ("/samples/png/x.png",
+ * "/uploads/x.png"), their prefix-less forms and raw relative paths.
+ */
+function resolveImagePath(relative: string): string {
   const cleaned = relative
     .replace(/^[/\\]+/, '')
-    .replace(/^samples[/\\]/i, '');
-  const target = path.resolve(root, cleaned);
+    .replace(/^public[/\\]/i, '')
+    .replace(/\\/g, '/');
+  const isUpload = cleaned.toLowerCase().startsWith('uploads/');
+  const root = path.resolve(isUpload ? uploadsRoot() : samplesRoot());
+  const rest = isUpload
+    ? cleaned.slice('uploads/'.length)
+    : cleaned.replace(/^samples[/\\]/i, '');
+  const target = path.resolve(root, rest);
   if (target !== root && !target.startsWith(root + path.sep)) {
-    throw new Error('Sample path must live inside public/samples.');
+    throw new Error(
+      `Image path must live inside public/${isUpload ? 'uploads' : 'samples'}.`
+    );
   }
   if (!existsSync(target)) {
-    throw new Error(`Sample not found: ${relative}`);
+    throw new Error(`Image not found: ${relative}`);
   }
   return target;
 }
@@ -392,8 +406,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           }
           breasts.push({
             laterality,
-            image_cc: resolveSamplePath(ccRaw),
-            image_mlo: resolveSamplePath(mloRaw),
+            image_cc: resolveImagePath(ccRaw),
+            image_mlo: resolveImagePath(mloRaw),
           });
         }
       } else {
@@ -407,8 +421,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
         breasts.push({
           laterality: '',
-          image_cc: resolveSamplePath(ccRaw),
-          image_mlo: resolveSamplePath(mloRaw),
+          image_cc: resolveImagePath(ccRaw),
+          image_mlo: resolveImagePath(mloRaw),
         });
       }
 

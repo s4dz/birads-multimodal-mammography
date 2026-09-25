@@ -290,6 +290,56 @@ const MESSAGES = {
   'review.jumpToFirst': { en: 'Jump to first', vi: 'Tới ảnh đầu tiên' },
   'review.connecting': { en: 'Connecting to worklist…', vi: 'Đang kết nối danh sách…' },
   'review.switchReviewer': { en: 'Switch reviewer', vi: 'Đổi bác sĩ' },
+  /* ---------------- upload to dataset ---------------- */
+  'upload.openButton': { en: 'Upload images', vi: 'Upload ảnh' },
+  'upload.title': {
+    en: 'Upload images to dataset',
+    vi: 'Upload ảnh vào bộ dữ liệu',
+  },
+  'upload.patientSection': { en: 'Patient', vi: 'Bệnh nhân' },
+  'upload.patientId': {
+    en: 'Patient ID (optional)',
+    vi: 'Mã bệnh nhân (tùy chọn)',
+  },
+  'upload.sex': { en: 'Sex', vi: 'Giới tính' },
+  'upload.age': { en: 'Age (optional)', vi: 'Tuổi (tùy chọn)' },
+  'upload.imagesSection': { en: 'Images', vi: 'Ảnh' },
+  'upload.breast': { en: 'Breast', vi: 'Vú' },
+  'upload.ccView': { en: 'CC view', vi: 'Ảnh CC' },
+  'upload.mloView': { en: 'MLO view', vi: 'Ảnh MLO' },
+  'upload.pickFile': { en: 'Pick a file…', vi: 'Chọn file…' },
+  'upload.addBreast': {
+    en: 'Add second breast (2 more images)',
+    vi: 'Thêm vú còn lại (thêm 2 ảnh)',
+  },
+  'upload.removeBreast': { en: 'Remove breast', vi: 'Bỏ vú này' },
+  'upload.breastHint': {
+    en: 'Each breast needs both views. PNG, JPG and DICOM are accepted.',
+    vi: 'Mỗi bên vú cần đủ cả 2 ảnh. Chấp nhận PNG, JPG và DICOM.',
+  },
+  'upload.missingBreast': {
+    en: 'Add at least one breast with both CC and MLO images.',
+    vi: 'Thêm ít nhất một bên vú có đủ ảnh CC và MLO.',
+  },
+  'upload.errorDefault': { en: 'Upload failed.', vi: 'Upload thất bại.' },
+  'upload.upload': { en: 'Upload', vi: 'Upload' },
+  /* ---------------- predict: save to dataset ---------------- */
+  'predict.saveToDataset': {
+    en: 'Save to dataset',
+    vi: 'Lưu vào dataset',
+  },
+  'predict.saveToDatasetBody': {
+    en: 'Permanently store these CC + MLO images as unlabeled dataset cases. They will appear in the review worklist under “No label”.',
+    vi: 'Lưu các ảnh CC + MLO này thành case chưa có nhãn trong dataset. Chúng sẽ xuất hiện trong danh sách duyệt ở mục “Chưa có nhãn”.',
+  },
+  'predict.saveToDatasetAction': {
+    en: 'Save 2 images to dataset',
+    vi: 'Lưu ảnh vào dataset',
+  },
+  'predict.saveToDatasetDone': {
+    en: '{count} images saved to the dataset as unlabeled cases.',
+    vi: 'Đã lưu {count} ảnh vào dataset dạng chưa có nhãn.',
+  },
   /* ---------------- queue rail ---------------- */
   'queue.title': { en: 'Patients · {count}', vi: 'Bệnh nhân · {count}' },
   'queue.views': { en: '{count} views', vi: '{count} ảnh' },

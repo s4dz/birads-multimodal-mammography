@@ -3,21 +3,29 @@ import {
   getCaseStudy,
   isAssigned,
   listDecisionsForImage,
+  updateCasePayload,
   upsertDecision,
 } from './db-repository';
+import { applyLabelToStudy } from './label-persist';
 import { biradsAuditLabel } from './taxonomy';
-import type { AppUser, ValidationRecord, ValidationStatus } from './types';
+import type {
+  AppUser,
+  PredictProbabilities,
+  ValidationRecord,
+  ValidationStatus,
+} from './types';
 
 /**
  * Shared decision-persistence logic for both the legacy `/api/validation`
- * endpoint and the explicit `/api/cases/:imageId/decision` route.
+ * endpoint and the explicit `/api/cases/:imageId/label` route.
  *
  * Security: the reviewer identity always comes from the backend session
  * (`user`), never from the request body. `originalLabel` is re-derived from
  * the stored case, so a caller cannot rewrite the AI audit string. `finalLabel`
  * is honoured from the request (predict sign-off needs it) but defaults to the
- * original label when omitted. Decisions are only accepted from an active
- * radiologist assigned to the case.
+ * original label when omitted. Radiologists may only decide on assigned cases;
+ * admins may persist a label on any case. After recording the decision the
+ * stored case label is updated so the worklist reflects it immediately.
  */
 
 export interface DecisionPayload {
@@ -27,19 +35,25 @@ export interface DecisionPayload {
   notes?: string;
 }
 
+export interface DecisionOptions {
+  /** Joint breast probabilities of the live predict (persisted into `ai`). */
+  classProbabilities?: PredictProbabilities;
+}
+
 export function submitDecision(
   user: AppUser,
   imageId: string,
-  payload: DecisionPayload
+  payload: DecisionPayload,
+  options: DecisionOptions = {}
 ): ValidationRecord {
-  if (user.role !== 'radiologist') {
-    throw new AppError(403, 'Only radiologists can record decisions.');
+  if (user.role !== 'radiologist' && user.role !== 'admin') {
+    throw new AppError(403, 'Only staff can record decisions.');
   }
   const study = getCaseStudy(imageId);
   if (!study) {
     throw new AppError(404, `Case "${imageId}" was not found.`);
   }
-  if (!isAssigned(imageId, user.id)) {
+  if (user.role === 'radiologist' && !isAssigned(imageId, user.id)) {
     throw new AppError(
       403,
       `You are not assigned to case "${imageId}". Ask an administrator to assign it.`
@@ -72,6 +86,15 @@ export function submitDecision(
     timestamp: new Date().toISOString(),
   };
   upsertDecision(record);
+  updateCasePayload(
+    imageId,
+    applyLabelToStudy(study, {
+      finalLabel,
+      status: payload.status,
+      classProbabilities: options.classProbabilities,
+    }),
+    false
+  );
   return record;
 }
 

@@ -213,7 +213,10 @@ export function ValidationPanel() {
       `/predict?sample=${encodeURIComponent(ccSample.image.url)}` +
       `&mlo=${encodeURIComponent(mloSample?.image.url ?? '')}` +
       `&laterality=${encodeURIComponent(active.acquisition.laterality)}` +
-      `&imageId=${encodeURIComponent(active.imageId)}&from=review`;
+      `&imageId=${encodeURIComponent(active.imageId)}&from=review` +
+      (partner
+        ? `&partnerId=${encodeURIComponent(partner.imageId)}`
+        : '');
 
     return (
       <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-slate-800 bg-slate-900/40 xl:w-96">

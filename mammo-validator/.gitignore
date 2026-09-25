@@ -39,6 +39,7 @@ mammo-validator/data/
 *.csv
 *.json
 public/samples/
+public/uploads/
 !package.json
 !package-lock.json
 !tsconfig.json

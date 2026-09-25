@@ -2,6 +2,8 @@
  * Static application configuration.
  */
 
+import type { UserRole } from './types';
+
 export const APP_CONFIG = {
   name: 'Mammo QA Workbench',
   shortName: 'MammoQA',
@@ -12,10 +14,12 @@ export type ReviewerProfile = {
   id: string;
   name: string;
   specialty: string;
+  role: UserRole;
 };
 
 export const API_ENDPOINTS = {
   cases: '/api/cases',
+  caseUpload: '/api/cases/upload',
   validation: '/api/validation',
   predict: '/api/predict',
   login: '/api/auth/login',
