@@ -26,7 +26,7 @@ The Suspicious class is the one that matters most clinically, and it is also the
 
 ```mermaid
 flowchart LR
-    I["Mammogram view<br/>(CC or MLO)"] --> S["Frozen SwinV2-Tiny<br/>image features"]
+    I["Mammogram view<br/>(CC or MLO)"] --> S["SwinV2-Tiny<br/>(last stage fine-tuned)"]
     T["Age + breast density"] --> E["Learnable tabular<br/>embedding"]
     S --> X["Cross-attention<br/>fusion"]
     E --> X
@@ -37,7 +37,7 @@ flowchart LR
     F --> B["Per-breast BI-RADS group"]
 ```
 
-1. **Image branch.** A frozen, pretrained SwinV2-Tiny (`swinv2_tiny_window16_256`) extracts features from each preprocessed mammogram.
+1. **Image branch.** A pretrained SwinV2-Tiny (`swinv2_tiny_window16_256`), frozen except for its last stage, extracts features from each preprocessed mammogram (1024 × 1024).
 2. **Tabular branch.** Age and breast density go through a learnable, FT-Transformer-style embedding.
 3. **Cross-attention fusion.** The image features attend to the clinical features. The result is a 256-dimensional latent vector, trained with a class-weighted loss.
 4. **Classifier.** CatBoost on the latent features, with class balancing. An evolutionary feature selector (IGWO-SOA) was also tried.
@@ -58,7 +58,21 @@ Out-of-fold results over 9,999 breasts, 4 folds, per-breast late fusion:
 | F1, Benign-leaning | 0.343 |
 | F1, Suspicious | 0.227 |
 
-Combining the two views helps a lot. The same out-of-fold predictions scored per image, without late fusion, reach a macro-F1 of 0.322. Performance on the Suspicious class is still low, which reflects how rare it is and how noisy the original labels are. That is why the project also builds a tool for radiologists to review those labels.
+Combining the two views helps a lot. The same out-of-fold predictions scored per image, without late fusion, reach a macro-F1 of 0.322.
+
+### Why the scores are modest
+
+A macro-F1 of 0.454 is low in absolute terms. Several properties of the task and the dataset limit what any model can reach on it:
+
+1. **The labels are radiologists' opinions, not biopsy results.** VinDr-Mammo has no BI-RADS 6 because biopsy results were not available. BI-RADS 2 findings were not annotated; only findings of BI-RADS 3 and above were marked with boxes ([Nguyen et al., *Scientific Data* 2023](https://arxiv.org/abs/2203.11205)). So the boundary between Normal and Benign-leaning has no localized evidence for a model to learn from.
+2. **Radiologists themselves often disagree on BI-RADS.** Studies of screening mammography report only fair agreement between readers on the final BI-RADS assessment, for example κ = 0.37 in [a study of a Barcelona screening programme](https://pmc.ncbi.nlm.nih.gov/articles/PMC3500788/). A model trained on one reading per breast inherits that uncertainty.
+3. **Severe class imbalance.** BI-RADS 4–5 make up about 5% of breasts, and BI-RADS 5 alone about 1%.
+4. **Breast-level labels on view-level images.** Each breast has one label, which is copied to both of its views, even when a finding is visible in only one of them. Scoring per breast instead of per image raised macro-F1 from 0.322 to 0.454 with no retraining. This suggests that much of the per-image "error" comes from how labels are assigned, not from the model.
+5. **Published results on the same dataset are in a similar range.** For example, a 2026 study reports a 5-class BI-RADS F1 of 50.4% on VinDr-Mammo, a large improvement over its baselines ([Token-based dual-view fusion, 2026](https://arxiv.org/abs/2607.06309)). Its class grouping and evaluation differ from this project's, so the numbers are not directly comparable.
+
+The model has limits of its own as well. It uses a small backbone that is mostly frozen and trained for only 5 epochs, and full-resolution mammograms are downsampled to 1024 × 1024. Its main weakness is the Suspicious class, where F1 is only 0.227.
+
+This is why the second half of the project is data-centric. Confident Learning flags **4,814 breasts (48.1%)** where the model confidently disagrees with the original label; about 65% of them sit between BI-RADS 1 and BI-RADS 2–3. These are **candidates for radiologist review** in `mammo-validator`, not confirmed labelling errors.
 
 ## Repository structure
 
