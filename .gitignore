@@ -19,3 +19,7 @@ desktop.ini
 Thumbs.db
 .DS_Store
 .vscode/
+
+# Local dataset-derived files (generated from VinDr-Mammo; never commit)
+mammo-validator/data/
+*.csv
