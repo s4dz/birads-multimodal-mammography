@@ -1,18 +1,21 @@
+# Research data and model artefacts (VinDr-Mammo is credentialed-access: never commit images or derived data)
 *.png
-*.pth
-*.rar
+*.dcm
 *.zip
-*.cbm
-*.pth
 *.rar
-*.zip
-*.png
 *.pth
 *.cbm
-*.rar
-*.zip
-*.png
-*.pth
-*.cbm
-*.rar
-*.zip
+*.db
+*.db-*
+
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+
+# OS / editor
+desktop.ini
+Thumbs.db
+.DS_Store
+.vscode/
